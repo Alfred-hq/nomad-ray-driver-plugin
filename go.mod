@@ -1,5 +1,5 @@
 // TODO: update the module path below to match your own repository
-module github.com/hashicorp/nomad-skeleton-driver-plugin
+module github.com/Alfred-hq/nomad-ray-driver-plugin
 
 go 1.21
 
