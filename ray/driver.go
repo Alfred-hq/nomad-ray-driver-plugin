@@ -1,33 +1,31 @@
 // Copyright (c) HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
-package hello
+package ray
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
+	"strings"
 	"time"
 
-	"github.com/hashicorp/consul-template/signals"
 	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/nomad/client/lib/fifo"
+	"github.com/hashicorp/nomad/client/structs"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
-	"github.com/hashicorp/nomad/drivers/shared/executor"
+	nstructs "github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	"github.com/hashicorp/nomad/plugins/shared/hclspec"
-	"github.com/hashicorp/nomad/plugins/shared/structs"
+	pstructs "github.com/hashicorp/nomad/plugins/shared/structs"
 )
 
 const (
 	// pluginName is the name of the plugin
 	// this is used for logging and (along with the version) for uniquely
 	// identifying plugin binaries fingerprinted by the client
-	pluginName = "hello-world-example"
+	pluginName = "ray"
 
 	// pluginVersion allows the client to identify and use newer versions of
 	// an installed plugin
@@ -71,9 +69,13 @@ var (
 		//       shell = "fish"
 		//     }
 		//   }
-		"shell": hclspec.NewDefault(
-			hclspec.NewAttr("shell", "string", false),
-			hclspec.NewLiteral(`"bash"`),
+		"ray_cluster_endpoint": hclspec.NewDefault(
+			hclspec.NewAttr("ray_cluster_endpoint", "string", false),
+			hclspec.NewLiteral(`"http://localhost:8265"`),
+		),
+		"enabled": hclspec.NewDefault(
+			hclspec.NewAttr("enabled", "bool", false),
+			hclspec.NewLiteral(`false`),
 		),
 	})
 
@@ -99,44 +101,88 @@ var (
 		//       }
 		//     }
 		//   }
-		"greeting": hclspec.NewDefault(
-			hclspec.NewAttr("greeting", "string", false),
-			hclspec.NewLiteral(`"Hello, World!"`),
+		"ray_cluster_endpoint": hclspec.NewDefault(
+			hclspec.NewAttr("ray_cluster_endpoint", "string", true),
+			hclspec.NewLiteral(`"http://localhost:8265"`),
 		),
+		"ray_api_endpoint": hclspec.NewDefault(
+			hclspec.NewAttr("ray_api_endpoint", "string", true),
+			hclspec.NewLiteral(`"http://localhost:8000"`),
+		),
+		"namespace": hclspec.NewDefault(
+			hclspec.NewAttr("namespace", "string", false),
+			hclspec.NewLiteral(`"default"`),
+		),
+		"max_actor_restarts": hclspec.NewDefault(
+			hclspec.NewAttr("max_actor_restarts", "int", false),
+			hclspec.NewLiteral(`0`),
+		),
+		"max_task_retries": hclspec.NewDefault(
+			hclspec.NewAttr("max_task_retries", "int", false),
+			hclspec.NewLiteral(`20`),
+		),
+		"num_cpus": hclspec.NewDefault(
+			hclspec.NewAttr("num_cpus", "float32", true),
+			hclspec.NewLiteral(`0.5`),
+		),
+		"memory_monitoring":  hclspec.NewBlock("memory_monitoring", false, memoryMonitoringConfigSpec),
+		"pipeline_file_path": hclspec.NewAttr("pipeline_file_path", "string", true),
+		"pipeline_runner":    hclspec.NewAttr("pipeline_runner", "string", true),
+		"actor_name":         hclspec.NewAttr("actor_name", "string", true),
 	})
 
+	memoryMonitoringConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
+		"enabled":          hclspec.NewAttr("enabled", "bool", false),
+		"metrics_endpoint": hclspec.NewAttr("metrics_endpoint", "string", false),
+		"memory_threshold": hclspec.NewAttr("memory_threshold", "int", false),
+	})
 	// capabilities indicates what optional features this driver supports
 	// this should be set according to the target run time.
 	capabilities = &drivers.Capabilities{
-		// TODO: set plugin's capabilities
-		//
 		// The plugin's capabilities signal Nomad which extra functionalities
 		// are supported. For a list of available options check the docs page:
 		// https://godoc.org/github.com/hashicorp/nomad/plugins/drivers#Capabilities
-		SendSignals: true,
+		//TODO: find references to implement signals properly
+		SendSignals: false,
 		Exec:        false,
+		RemoteTasks: true,
 	}
 )
 
 // Config contains configuration information for the plugin
 type Config struct {
-	// TODO: create decoded plugin configuration struct
-	//
 	// This struct is the decoded version of the schema defined in the
 	// configSpec variable above. It's used to convert the HCL configuration
 	// passed by the Nomad agent into Go contructs.
-	Shell string `codec:"shell"`
+	Enabled            bool   `codec:"enabled"`
+	RayClusterEndpoint string `codec:"rayClusterEndpoint"`
 }
 
 // TaskConfig contains configuration information for a task that runs with
 // this plugin
 type TaskConfig struct {
-	// TODO: create decoded plugin task configuration struct
-	//
 	// This struct is the decoded version of the schema defined in the
 	// taskConfigSpec variable above. It's used to convert the string
 	// configuration for the task into Go contructs.
-	Greeting string `codec:"greeting"`
+	Namespace          string                 `codec:"namespace"`
+	RayClusterEndpoint string                 `codec:"ray_cluster_endpoint"`
+	RayServeEndpoint   string                 `codec:"ray_api_endpoint"`
+	MemoryMonitoring   MemoryMonitoringConfig `codec:"memory_monitoring"`
+	MaxActorRestarts   int                    `codec:"max_actor_restarts"`
+	NumCpu             float32                `codec:"num_cpus"`
+	MaxTaskRetries     int                    `codec:"max_task_retries"`
+	PipelineFilePath   string                 `codec:"pipeline_file_path"`
+	PipelineRunner     string                 `codec:"pipeline_runner"`
+	ActorName          string                 `codec:"actor_name"`
+}
+
+type MemoryMonitoringConfig struct {
+	// This struct is the decoded version of the schema defined in the
+	// taskConfigSpec variable above. It's used to convert the string
+	// configuration for the task into Go contructs.
+	MetricsEndpoint string `codec:"metrics_endpoint"`
+	Enabled         bool   `codec:"enabled"`
+	MemoryThreshold int    `codec:"memory_threshold"`
 }
 
 // TaskState is the runtime state which is encoded in the handle returned to
@@ -144,24 +190,20 @@ type TaskConfig struct {
 // This information is needed to rebuild the task state and handler during
 // recovery.
 type TaskState struct {
-	ReattachConfig *structs.ReattachConfig
-	TaskConfig     *drivers.TaskConfig
-	StartedAt      time.Time
+	TaskConfig *drivers.TaskConfig
+	StartedAt  time.Time
 
-	// TODO: add any extra important values that must be persisted in order
-	// to restore a task.
-	//
 	// The plugin keeps track of its running tasks in a in-memory data
 	// structure. If the plugin crashes, this data will be lost, so Nomad
 	// will respawn a new instance of the plugin and try to restore its
 	// in-memory representation of the running tasks using the RecoverTask()
 	// method below.
-	Pid int
+	ActorID string
 }
 
-// HelloDriverPlugin is an example driver plugin. When provisioned in a job,
+// RayDriverPlugin is an example driver plugin. When provisioned in a job,
 // the taks will output a greet specified by the user.
-type HelloDriverPlugin struct {
+type RayDriverPlugin struct {
 	// eventer is used to handle multiplexing of TaskEvents calls such that an
 	// event can be broadcast to all callers
 	eventer *eventer.Eventer
@@ -185,6 +227,8 @@ type HelloDriverPlugin struct {
 
 	// logger will log to the Nomad agent
 	logger hclog.Logger
+
+	client rayRestInterface
 }
 
 // NewPlugin returns a new example driver plugin
@@ -192,7 +236,7 @@ func NewPlugin(logger hclog.Logger) drivers.DriverPlugin {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger = logger.Named(pluginName)
 
-	return &HelloDriverPlugin{
+	return &RayDriverPlugin{
 		eventer:        eventer.NewEventer(ctx, logger),
 		config:         &Config{},
 		tasks:          newTaskStore(),
@@ -203,17 +247,17 @@ func NewPlugin(logger hclog.Logger) drivers.DriverPlugin {
 }
 
 // PluginInfo returns information describing the plugin.
-func (d *HelloDriverPlugin) PluginInfo() (*base.PluginInfoResponse, error) {
+func (d *RayDriverPlugin) PluginInfo() (*base.PluginInfoResponse, error) {
 	return pluginInfo, nil
 }
 
 // ConfigSchema returns the plugin configuration schema.
-func (d *HelloDriverPlugin) ConfigSchema() (*hclspec.Spec, error) {
+func (d *RayDriverPlugin) ConfigSchema() (*hclspec.Spec, error) {
 	return configSpec, nil
 }
 
 // SetConfig is called by the client to pass the configuration for the plugin.
-func (d *HelloDriverPlugin) SetConfig(cfg *base.Config) error {
+func (d *RayDriverPlugin) SetConfig(cfg *base.Config) error {
 	var config Config
 	if len(cfg.PluginConfig) != 0 {
 		if err := base.MsgPackDecode(cfg.PluginConfig, &config); err != nil {
@@ -233,10 +277,10 @@ func (d *HelloDriverPlugin) SetConfig(cfg *base.Config) error {
 	//
 	// In the example below we check if the shell specified by the user is
 	// supported by the plugin.
-	shell := d.config.Shell
-	if shell != "bash" && shell != "fish" {
-		return fmt.Errorf("invalid shell %s", d.config.Shell)
-	}
+	// shell := d.config.Shell
+	// if shell != "bash" && shell != "fish" {
+	// 	return fmt.Errorf("invalid shell %s", d.config.Shell)
+	// }
 
 	// Save the Nomad agent configuration
 	if cfg.AgentConfig != nil {
@@ -247,30 +291,41 @@ func (d *HelloDriverPlugin) SetConfig(cfg *base.Config) error {
 	//
 	// Here you can use the config values to initialize any resources that are
 	// shared by all tasks that use this driver, such as a daemon process.
+	client, err := d.getRayConfig(config.RayClusterEndpoint)
+	if err != nil {
+		return fmt.Errorf("failed to get ray client: %v", err)
+	}
+	d.client = client
 
 	return nil
 }
 
+func (d *RayDriverPlugin) getRayConfig(cluster string) (rayRestInterface, error) {
+	return rayRestClient{
+		rayClusterEndpoint: cluster,
+	}, nil
+}
+
 // TaskConfigSchema returns the HCL schema for the configuration of a task.
-func (d *HelloDriverPlugin) TaskConfigSchema() (*hclspec.Spec, error) {
+func (d *RayDriverPlugin) TaskConfigSchema() (*hclspec.Spec, error) {
 	return taskConfigSpec, nil
 }
 
 // Capabilities returns the features supported by the driver.
-func (d *HelloDriverPlugin) Capabilities() (*drivers.Capabilities, error) {
+func (d *RayDriverPlugin) Capabilities() (*drivers.Capabilities, error) {
 	return capabilities, nil
 }
 
 // Fingerprint returns a channel that will be used to send health information
 // and other driver specific node attributes.
-func (d *HelloDriverPlugin) Fingerprint(ctx context.Context) (<-chan *drivers.Fingerprint, error) {
+func (d *RayDriverPlugin) Fingerprint(ctx context.Context) (<-chan *drivers.Fingerprint, error) {
 	ch := make(chan *drivers.Fingerprint)
 	go d.handleFingerprint(ctx, ch)
 	return ch, nil
 }
 
 // handleFingerprint manages the channel and the flow of fingerprint data.
-func (d *HelloDriverPlugin) handleFingerprint(ctx context.Context, ch chan<- *drivers.Fingerprint) {
+func (d *RayDriverPlugin) handleFingerprint(ctx context.Context, ch chan<- *drivers.Fingerprint) {
 	defer close(ch)
 
 	// Nomad expects the initial fingerprint to be sent immediately
@@ -285,22 +340,13 @@ func (d *HelloDriverPlugin) handleFingerprint(ctx context.Context, ch chan<- *dr
 			// after the initial fingerprint we can set the proper fingerprint
 			// period
 			ticker.Reset(fingerprintPeriod)
-			ch <- d.buildFingerprint()
+			ch <- d.buildFingerprint(ctx)
 		}
 	}
 }
 
 // buildFingerprint returns the driver's fingerprint data
-func (d *HelloDriverPlugin) buildFingerprint() *drivers.Fingerprint {
-	fp := &drivers.Fingerprint{
-		Attributes:        map[string]*structs.Attribute{},
-		Health:            drivers.HealthStateHealthy,
-		HealthDescription: drivers.DriverHealthy,
-	}
-
-	// TODO: implement fingerprinting logic to populate health and driver
-	// attributes.
-	//
+func (d *RayDriverPlugin) buildFingerprint(ctx context.Context) *drivers.Fingerprint {
 	// Fingerprinting is used by the plugin to relay two important information
 	// to Nomad: health state and node attributes.
 	//
@@ -314,33 +360,34 @@ func (d *HelloDriverPlugin) buildFingerprint() *drivers.Fingerprint {
 	//
 	// In the example below we check if the shell specified by the user exists
 	// in the node.
-	shell := d.config.Shell
+	var health drivers.HealthState
+	var desc string
+	attrs := map[string]*pstructs.Attribute{}
 
-	cmd := exec.Command("which", shell)
-	if err := cmd.Run(); err != nil {
-		return &drivers.Fingerprint{
-			Health:            drivers.HealthStateUndetected,
-			HealthDescription: fmt.Sprintf("shell %s not found", shell),
+	if d.config.Enabled {
+		if err := d.client.DescribeCluster(ctx); err != nil {
+			health = drivers.HealthStateUnhealthy
+			desc = err.Error()
+			attrs["driver.ecs"] = pstructs.NewBoolAttribute(false)
+		} else {
+			health = drivers.HealthStateHealthy
+			desc = "Healthy"
+			attrs["driver.ecs"] = pstructs.NewBoolAttribute(true)
 		}
-	}
-
-	// We also set the shell and its version as attributes
-	cmd = exec.Command(shell, "--version")
-	if out, err := cmd.Output(); err != nil {
-		d.logger.Warn("failed to find shell version: %v", err)
 	} else {
-		re := regexp.MustCompile("[0-9]\\.[0-9]\\.[0-9]")
-		version := re.FindString(string(out))
-
-		fp.Attributes["driver.hello.shell_version"] = structs.NewStringAttribute(version)
-		fp.Attributes["driver.hello.shell"] = structs.NewStringAttribute(shell)
+		health = drivers.HealthStateUndetected
+		desc = "disabled"
 	}
 
-	return fp
+	return &drivers.Fingerprint{
+		Attributes:        attrs,
+		Health:            health,
+		HealthDescription: desc,
+	}
 }
 
 // StartTask returns a task handle and a driver network if necessary.
-func (d *HelloDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
+func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
 	if _, ok := d.tasks.Get(cfg.ID); ok {
 		return nil, nil, fmt.Errorf("task with ID %q already started", cfg.ID)
 	}
@@ -353,6 +400,7 @@ func (d *HelloDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHan
 	d.logger.Info("starting task", "driver_cfg", hclog.Fmt("%+v", driverConfig))
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
+	actorId := driverConfig.ActorName + "_" + strings.ReplaceAll(cfg.AllocID, "-", "")
 
 	// TODO: implement driver specific mechanism to start the task.
 	//
@@ -370,45 +418,38 @@ func (d *HelloDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHan
 	// greeter. The executor is then stored in the handle so we can access it
 	// later and the the plugin.Client is used to generate a reattach
 	// configuration that can be used to recover communication with the task.
-	executorConfig := &executor.ExecutorConfig{
-		LogFile:  filepath.Join(cfg.TaskDir().Dir, "executor.out"),
-		LogLevel: "debug",
-	}
-
-	exec, pluginClient, err := executor.CreateExecutor(d.logger, d.nomadConfig, executorConfig)
+	stdout, err := fifo.OpenWriter(cfg.StdoutPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create executor: %v", err)
+		d.logger.Error("failed to open stdout writer", "error", err)
+	} else {
+		defer stdout.Close()
 	}
 
-	echoCmd := fmt.Sprintf(`echo "%s"`, driverConfig.Greeting)
-	execCmd := &executor.ExecCommand{
-		Cmd:        d.config.Shell,
-		Args:       []string{"-c", echoCmd},
-		StdoutPath: cfg.StdoutPath,
-		StderrPath: cfg.StderrPath,
-	}
-
-	ps, err := exec.Launch(execCmd)
 	if err != nil {
-		pluginClient.Kill()
-		return nil, nil, fmt.Errorf("failed to launch command with executor: %v", err)
+		return nil, nil, fmt.Errorf("failed to open FIFO writer: %v", err)
+	}
+	fmt.Fprintf(stdout, "starting task\n")
+
+	_, err = d.client.RunTask(d.ctx, driverConfig, actorId)
+	if err != nil {
+		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
+		return nil, nil, nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
 
 	h := &taskHandle{
-		exec:         exec,
-		pid:          ps.Pid,
-		pluginClient: pluginClient,
-		taskConfig:   cfg,
-		procState:    drivers.TaskStateRunning,
-		startedAt:    time.Now().Round(time.Millisecond),
-		logger:       d.logger,
+		ActorID:    actorId,
+		ctx:        d.ctx,
+		cancel:     d.signalShutdown,
+		taskConfig: cfg,
+		procState:  drivers.TaskStateRunning,
+		startedAt:  time.Now().Round(time.Millisecond),
+		logger:     d.logger,
 	}
 
 	driverState := TaskState{
-		ReattachConfig: structs.ReattachConfigFromGoPlugin(pluginClient.ReattachConfig()),
-		Pid:            ps.Pid,
-		TaskConfig:     cfg,
-		StartedAt:      h.startedAt,
+		ActorID:    actorId,
+		TaskConfig: cfg,
+		StartedAt:  h.startedAt,
 	}
 
 	if err := handle.SetDriverState(&driverState); err != nil {
@@ -421,22 +462,33 @@ func (d *HelloDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHan
 }
 
 // RecoverTask recreates the in-memory state of a task from a TaskHandle.
-func (d *HelloDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
+func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	if handle == nil {
 		return errors.New("error: handle cannot be nil")
 	}
+	stdout, err := fifo.OpenWriter(handle.Config.StdoutPath)
+	if err != nil {
+		d.logger.Error("failed to open stdout writer", "error", err)
+	} else {
+		defer stdout.Close()
+	}
+
+	fmt.Fprintf(stdout, "recovering task - %s\n", handle.Config.ID)
 
 	if _, ok := d.tasks.Get(handle.Config.ID); ok {
+		fmt.Fprintf(stdout, "no task to recover; task already exists - %s\n", handle.Config.Name)
 		return nil
 	}
 
 	var taskState TaskState
 	if err := handle.GetDriverState(&taskState); err != nil {
+		fmt.Fprintf(stdout, "failed to decode task state from handle: %v\n", err)
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
 	var driverConfig TaskConfig
 	if err := taskState.TaskConfig.DecodeDriverConfig(&driverConfig); err != nil {
+		fmt.Fprintf(stdout, "failed to decode driver config: %v\n", err)
 		return fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
@@ -447,24 +499,19 @@ func (d *HelloDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	//
 	// In the example below we use the executor to re-attach to the process
 	// that was created when the task first started.
-	plugRC, err := structs.ReattachConfigToGoPlugin(taskState.ReattachConfig)
+	actorId := driverConfig.ActorName + "_" + strings.ReplaceAll(handle.Config.AllocID, "-", "")
+	_, err = d.client.RunTask(d.ctx, driverConfig, actorId)
 	if err != nil {
-		return fmt.Errorf("failed to build ReattachConfig from taskConfig state: %v", err)
-	}
-
-	execImpl, pluginClient, err := executor.ReattachToExecutor(plugRC, d.logger, d.nomadConfig.Topology.Compute())
-	if err != nil {
-		return fmt.Errorf("failed to reattach to executor: %v", err)
+		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
+		return nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
 
 	h := &taskHandle{
-		exec:         execImpl,
-		pid:          taskState.Pid,
-		pluginClient: pluginClient,
-		taskConfig:   taskState.TaskConfig,
-		procState:    drivers.TaskStateRunning,
-		startedAt:    taskState.StartedAt,
-		exitResult:   &drivers.ExitResult{},
+		ActorID:    taskState.ActorID,
+		taskConfig: taskState.TaskConfig,
+		procState:  drivers.TaskStateRunning,
+		startedAt:  taskState.StartedAt,
+		exitResult: &drivers.ExitResult{},
 	}
 
 	d.tasks.Set(taskState.TaskConfig.ID, h)
@@ -474,18 +521,24 @@ func (d *HelloDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 }
 
 // WaitTask returns a channel used to notify Nomad when a task exits.
-func (d *HelloDriverPlugin) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {
+func (d *RayDriverPlugin) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
-
+	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
+	if err != nil {
+		d.logger.Error("failed to open stdout writer", "error", err)
+	} else {
+		defer stdout.Close()
+	}
+	fmt.Fprintf(stdout, "inside wait task \n")
 	ch := make(chan *drivers.ExitResult)
 	go d.handleWait(ctx, handle, ch)
 	return ch, nil
 }
 
-func (d *HelloDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch chan *drivers.ExitResult) {
+func (d *RayDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch chan *drivers.ExitResult) {
 	defer close(ch)
 	var result *drivers.ExitResult
 
@@ -499,31 +552,25 @@ func (d *HelloDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, 
 	// In the example below we block and wait until the executor finishes
 	// running, at which point we send the exit code and signal in the result
 	// channel.
-	ps, err := handle.exec.Wait(ctx)
-	if err != nil {
-		result = &drivers.ExitResult{
-			Err: fmt.Errorf("executor: error waiting on process: %v", err),
-		}
-	} else {
-		result = &drivers.ExitResult{
-			ExitCode: ps.ExitCode,
-			Signal:   ps.Signal,
-		}
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-d.ctx.Done():
 			return
+		case <-handle.doneCh:
+			result = &drivers.ExitResult{
+				ExitCode: handle.exitResult.ExitCode,
+				Signal:   handle.exitResult.Signal,
+				Err:      handle.exitResult.Err,
+			}
 		case ch <- result:
 		}
 	}
 }
 
 // StopTask stops a running task with the given signal and within the timeout window.
-func (d *HelloDriverPlugin) StopTask(taskID string, timeout time.Duration, signal string) error {
+func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal string) error {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
@@ -538,18 +585,29 @@ func (d *HelloDriverPlugin) StopTask(taskID string, timeout time.Duration, signa
 	// In the example below we let the executor handle the task shutdown
 	// process for us, but you might need to customize this for your own
 	// implementation.
-	if err := handle.exec.Shutdown(signal, timeout); err != nil {
-		if handle.pluginClient.Exited() {
-			return nil
-		}
-		return fmt.Errorf("executor Shutdown failed: %v", err)
+	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
+	if err != nil {
+		d.logger.Error("failed to open stdout writer", "error", err)
+	} else {
+		defer stdout.Close()
 	}
+	fmt.Fprintf(stdout, "stopping task with detach mode - %t \n", signal == drivers.DetachSignal)
+
+	actorId := handle.ActorID
+
+	_, err = d.client.DeleteActor(d.ctx, actorId)
+
+	if err != nil {
+		fmt.Fprintf(stdout, "failed to stop remote task [%s] - [%s] \n", actorId, err)
+	}
+
+	fmt.Fprintf(stdout, "remote task stopped - [%s]\n", actorId)
 
 	return nil
 }
 
 // DestroyTask cleans up and removes a task that has terminated.
-func (d *HelloDriverPlugin) DestroyTask(taskID string, force bool) error {
+func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
@@ -567,20 +625,20 @@ func (d *HelloDriverPlugin) DestroyTask(taskID string, force bool) error {
 	//
 	// In the example below we use the executor to force shutdown the task
 	// (timeout equals 0).
-	if !handle.pluginClient.Exited() {
-		if err := handle.exec.Shutdown("", 0); err != nil {
-			handle.logger.Error("destroying executor failed", "err", err)
-		}
-
-		handle.pluginClient.Kill()
+	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
+	if err != nil {
+		d.logger.Error("failed to open stdout writer", "error", err)
+	} else {
+		defer stdout.Close()
 	}
+	fmt.Fprintf(stdout, "running destroy task, with force mode - %t \n", force)
 
 	d.tasks.Delete(taskID)
 	return nil
 }
 
 // InspectTask returns detailed status information for the referenced taskID.
-func (d *HelloDriverPlugin) InspectTask(taskID string) (*drivers.TaskStatus, error) {
+func (d *RayDriverPlugin) InspectTask(taskID string) (*drivers.TaskStatus, error) {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
@@ -590,31 +648,57 @@ func (d *HelloDriverPlugin) InspectTask(taskID string) (*drivers.TaskStatus, err
 }
 
 // TaskStats returns a channel which the driver should send stats to at the given interval.
-func (d *HelloDriverPlugin) TaskStats(ctx context.Context, taskID string, interval time.Duration) (<-chan *drivers.TaskResourceUsage, error) {
-	handle, ok := d.tasks.Get(taskID)
+func (d *RayDriverPlugin) TaskStats(ctx context.Context, taskID string, interval time.Duration) (<-chan *drivers.TaskResourceUsage, error) {
+	_, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
 
-	// TODO: implement driver specific logic to send task stats.
-	//
 	// This function returns a channel that Nomad will use to listen for task
 	// stats (e.g., CPU and memory usage) in a given interval. It should send
 	// stats until the context is canceled or the task stops running.
 	//
 	// In the example below we use the Stats function provided by the executor,
 	// but you can build a set of functions similar to the fingerprint process.
-	return handle.exec.Stats(ctx, interval)
+	ch := make(chan *drivers.TaskResourceUsage)
+
+	go func() {
+		defer d.logger.Info("stopped sending ray task stats", "task_id", taskID)
+		defer close(ch)
+		for {
+			select {
+			case <-time.After(interval):
+
+				// Nomad core does not currently have any resource based
+				// support for remote drivers. Once this changes, we may be
+				// able to report actual usage here.
+				//
+				// This is required, otherwise the driver panics.
+				ch <- &structs.TaskResourceUsage{
+					ResourceUsage: &drivers.ResourceUsage{
+						MemoryStats: &drivers.MemoryStats{},
+						CpuStats:    &drivers.CpuStats{},
+					},
+					Timestamp: time.Now().UTC().UnixNano(),
+				}
+			case <-ctx.Done():
+				return
+			}
+
+		}
+	}()
+
+	return ch, nil
 }
 
 // TaskEvents returns a channel that the plugin can use to emit task related events.
-func (d *HelloDriverPlugin) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, error) {
+func (d *RayDriverPlugin) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, error) {
 	return d.eventer.TaskEvents(ctx)
 }
 
 // SignalTask forwards a signal to a task.
 // This is an optional capability.
-func (d *HelloDriverPlugin) SignalTask(taskID string, signal string) error {
+func (d *RayDriverPlugin) SignalTask(taskID string, signal string) error {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
@@ -625,19 +709,21 @@ func (d *HelloDriverPlugin) SignalTask(taskID string, signal string) error {
 	// The given signal must be forwarded to the target taskID. If this plugin
 	// doesn't support receiving signals (capability SendSignals is set to
 	// false) you can just return nil.
-	sig := os.Interrupt
-	if s, ok := signals.SignalLookup[signal]; ok {
-		sig = s
+	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
+	if err != nil {
+		d.logger.Error("failed to open stdout writer", "error", err)
 	} else {
-		d.logger.Warn("unknown signal to send to task, using SIGINT instead", "signal", signal, "task_id", handle.taskConfig.ID)
-
+		defer stdout.Close()
 	}
-	return handle.exec.Signal(sig)
+	fmt.Fprintf(stdout, "%s signal received, deleting task \n", signal)
+
+	d.tasks.Delete(taskID)
+	return nil
 }
 
 // ExecTask returns the result of executing the given command inside a task.
 // This is an optional capability.
-func (d *HelloDriverPlugin) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
+func (d *RayDriverPlugin) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
 	// TODO: implement driver specific logic to execute commands in a task.
 	return nil, errors.New("This driver does not support exec")
 }
