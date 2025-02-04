@@ -32,7 +32,7 @@ async def shutdown(loop, signal=None):
 
 @ray.remote(max_restarts={{.MaxActorRestarts}}, max_task_retries={{.MaxTaskRetries}})
 class {{.ActorName}}:
-    async def runner:
+    async def runner():
         # Start both tasks
         directory_path = os.path.dirname(\"{{.PipelineFilePath}}\")
 
