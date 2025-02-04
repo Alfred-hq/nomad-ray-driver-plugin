@@ -1,0 +1,78 @@
+name: build nomad remote ray driver
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+      - feat/ray
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-22.04 # Specifies Ubuntu 22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.22.3"
+
+      - name: Cache Go modules
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build the Go binary
+        run: |
+          go build -o nomad-remote-ray-driver
+
+      - name: Upload binary as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nomad-remote-ray-driver-binary
+          path: nomad-remote-ray-driver
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-22.04
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nomad-remote-ray-driver-binary
+
+      - name: Create Tag
+        id: tag
+        run: |
+          TAG_NAME="v$(date +'%Y%m%d%H%M%S')"
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+          echo "::set-output name=TAG::$TAG_NAME"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.TAG }}
+          files: nomad-remote-ray-driver
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
