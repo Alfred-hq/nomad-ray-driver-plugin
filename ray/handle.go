@@ -89,12 +89,13 @@ func (h *taskHandle) run() {
 		return
 	}
 	defer stdout.Close()
-
+	fmt.Fprintf(stdout, "task handle run - %s\n", h.ActorID)
 	client := rayRestClient{
 		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
 	}
 
 	for {
+		fmt.Fprintf(stdout, "getting actor status - %s\n")
 		status, err := client.GetActorStatusCLI(h.ctx, h.ActorID)
 		if err != nil {
 			fmt.Fprintf(stdout, "Error retrieving actor status: %v\n", err)

@@ -505,7 +505,7 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
 		return nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
-
+	fmt.Fprintf(stdout, "task started - %s\n", actorId)
 	h := &taskHandle{
 		ActorID:    taskState.ActorID,
 		taskConfig: taskState.TaskConfig,
@@ -513,9 +513,9 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 		startedAt:  taskState.StartedAt,
 		exitResult: &drivers.ExitResult{},
 	}
-
+	fmt.Fprintf(stdout, "task handle created - %s\n", taskState.ActorID)
 	d.tasks.Set(taskState.TaskConfig.ID, h)
-
+	fmt.Fprintf(stdout, "task handle set - %s\n", taskState.TaskConfig.ID)
 	go h.run()
 	return nil
 }
