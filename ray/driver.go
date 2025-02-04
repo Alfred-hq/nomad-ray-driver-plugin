@@ -435,7 +435,7 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
 		return nil, nil, nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
-
+	fmt.Fprintf(stdout, "task started - %s\n", actorId)
 	h := &taskHandle{
 		ActorID:    actorId,
 		ctx:        d.ctx,
@@ -444,18 +444,19 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 		procState:  drivers.TaskStateRunning,
 		startedAt:  time.Now().Round(time.Millisecond),
 		logger:     d.logger,
+		doneCh:     make(chan struct{}),
 	}
-
+	fmt.Fprintf(stdout, "task handle created - %s\n", actorId)
 	driverState := TaskState{
 		ActorID:    actorId,
 		TaskConfig: cfg,
 		StartedAt:  h.startedAt,
 	}
-
+	fmt.Fprintf(stdout, "driver state set - %s\n", actorId)
 	if err := handle.SetDriverState(&driverState); err != nil {
 		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
 	}
-
+	fmt.Fprintf(stdout, "driver state set - %s\n", actorId)
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
 	return handle, nil, nil
@@ -512,6 +513,10 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 		procState:  drivers.TaskStateRunning,
 		startedAt:  taskState.StartedAt,
 		exitResult: &drivers.ExitResult{},
+		ctx:        d.ctx,
+		cancel:     d.signalShutdown,
+		logger:     d.logger,
+		doneCh:     make(chan struct{}),
 	}
 	fmt.Fprintf(stdout, "task handle created - %s\n", taskState.ActorID)
 	d.tasks.Set(taskState.TaskConfig.ID, h)
