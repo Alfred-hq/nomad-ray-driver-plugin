@@ -114,15 +114,15 @@ var (
 			hclspec.NewLiteral(`"default"`),
 		),
 		"max_actor_restarts": hclspec.NewDefault(
-			hclspec.NewAttr("max_actor_restarts", "int", false),
+			hclspec.NewAttr("max_actor_restarts", "number", false),
 			hclspec.NewLiteral(`0`),
 		),
 		"max_task_retries": hclspec.NewDefault(
-			hclspec.NewAttr("max_task_retries", "int", false),
+			hclspec.NewAttr("max_task_retries", "number", false),
 			hclspec.NewLiteral(`20`),
 		),
 		"num_cpus": hclspec.NewDefault(
-			hclspec.NewAttr("num_cpus", "float32", true),
+			hclspec.NewAttr("num_cpus", "number", false),
 			hclspec.NewLiteral(`0.5`),
 		),
 		"memory_monitoring":  hclspec.NewBlock("memory_monitoring", false, memoryMonitoringConfigSpec),
@@ -134,7 +134,7 @@ var (
 	memoryMonitoringConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
 		"enabled":          hclspec.NewAttr("enabled", "bool", false),
 		"metrics_endpoint": hclspec.NewAttr("metrics_endpoint", "string", false),
-		"memory_threshold": hclspec.NewAttr("memory_threshold", "int", false),
+		"memory_threshold": hclspec.NewAttr("memory_threshold", "number", false),
 	})
 	// capabilities indicates what optional features this driver supports
 	// this should be set according to the target run time.
@@ -168,9 +168,9 @@ type TaskConfig struct {
 	RayClusterEndpoint string                 `codec:"ray_cluster_endpoint"`
 	RayServeEndpoint   string                 `codec:"ray_api_endpoint"`
 	MemoryMonitoring   MemoryMonitoringConfig `codec:"memory_monitoring"`
-	MaxActorRestarts   int                    `codec:"max_actor_restarts"`
-	NumCpu             float32                `codec:"num_cpus"`
-	MaxTaskRetries     int                    `codec:"max_task_retries"`
+	MaxActorRestarts   int64                  `codec:"max_actor_restarts"`
+	NumCpu             float64                `codec:"num_cpus"`
+	MaxTaskRetries     int64                  `codec:"max_task_retries"`
 	PipelineFilePath   string                 `codec:"pipeline_file_path"`
 	PipelineRunner     string                 `codec:"pipeline_runner"`
 	ActorName          string                 `codec:"actor_name"`
@@ -182,7 +182,7 @@ type MemoryMonitoringConfig struct {
 	// configuration for the task into Go contructs.
 	MetricsEndpoint string `codec:"metrics_endpoint"`
 	Enabled         bool   `codec:"enabled"`
-	MemoryThreshold int    `codec:"memory_threshold"`
+	MemoryThreshold int64  `codec:"memory_threshold"`
 }
 
 // TaskState is the runtime state which is encoded in the handle returned to
