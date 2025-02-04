@@ -155,7 +155,7 @@ type Config struct {
 	// configSpec variable above. It's used to convert the HCL configuration
 	// passed by the Nomad agent into Go contructs.
 	Enabled            bool   `codec:"enabled"`
-	RayClusterEndpoint string `codec:"rayClusterEndpoint"`
+	RayClusterEndpoint string `codec:"ray_cluster_endpoint"`
 }
 
 // TaskConfig contains configuration information for a task that runs with
