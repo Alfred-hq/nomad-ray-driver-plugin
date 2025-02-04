@@ -46,7 +46,7 @@ type rayRestInterface interface {
 
 	DeleteActorCLI(ctx context.Context, actorID string) (string, error)
 
-	GetActorMemory(ctx context.Context, metricsEndpoint string, actorID string) (int, error)
+	GetActorMemory(ctx context.Context, metricsEndpoint string, actorID string) (int64, error)
 	// // StopTask stops the running ECS task, adding a custom message which can
 	// // be viewed via the AWS console specifying it was this Nomad driver which
 	// // performed the action.
@@ -336,7 +336,7 @@ except Exception as e:
 	return strings.TrimSpace(string(output)), nil
 }
 
-func (c rayRestClient) GetActorMemory(ctx context.Context, metricsEndpoint string, actorID string) (int, error) {
+func (c rayRestClient) GetActorMemory(ctx context.Context, metricsEndpoint string, actorID string) (int64, error) {
 
 	// Append ".runner" to the actorID for metric matching
 	actorIDWithSuffix := fmt.Sprintf(`%s.runner`, actorID)
@@ -373,5 +373,5 @@ func (c rayRestClient) GetActorMemory(ctx context.Context, metricsEndpoint strin
 		return 0, fmt.Errorf("metric not found or value is zero")
 	}
 
-	return int(value), nil
+	return int64(value), nil
 }
