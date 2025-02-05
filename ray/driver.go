@@ -368,11 +368,11 @@ func (d *RayDriverPlugin) buildFingerprint(ctx context.Context) *drivers.Fingerp
 		if err := d.client.DescribeCluster(ctx); err != nil {
 			health = drivers.HealthStateUnhealthy
 			desc = err.Error()
-			attrs["driver.ecs"] = pstructs.NewBoolAttribute(false)
+			attrs["driver.ray"] = pstructs.NewBoolAttribute(false)
 		} else {
 			health = drivers.HealthStateHealthy
 			desc = "Healthy"
-			attrs["driver.ecs"] = pstructs.NewBoolAttribute(true)
+			attrs["driver.ray"] = pstructs.NewBoolAttribute(true)
 		}
 	} else {
 		health = drivers.HealthStateUndetected
@@ -421,25 +421,26 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 	stdout, err := fifo.OpenWriter(cfg.StdoutPath)
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
-	} else {
-		defer stdout.Close()
-	}
-
-	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open FIFO writer: %v", err)
 	}
+	defer stdout.Close()
+
 	fmt.Fprintf(stdout, "starting task\n")
 
-	_, err = d.client.RunTask(d.ctx, driverConfig, actorId)
+	taskCtx, taskCancel := context.WithCancel(context.Background())
+
+	_, err = d.client.RunTask(taskCtx, driverConfig, actorId)
 	if err != nil {
+		taskCancel()
 		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
 		return nil, nil, nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
 	fmt.Fprintf(stdout, "task started - %s\n", actorId)
+
 	h := &taskHandle{
 		ActorID:      actorId,
-		ctx:          d.ctx,
-		cancel:       d.signalShutdown,
+		ctx:          taskCtx,
+		cancel:       taskCancel,
 		taskConfig:   cfg,
 		procState:    drivers.TaskStateRunning,
 		startedAt:    time.Now().Round(time.Millisecond),
@@ -448,18 +449,23 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 		driverConfig: driverConfig,
 	}
 	fmt.Fprintf(stdout, "task handle created - %s\n", actorId)
+
 	driverState := TaskState{
 		ActorID:    actorId,
 		TaskConfig: cfg,
 		StartedAt:  h.startedAt,
 	}
-	fmt.Fprintf(stdout, "driver state set - %s\n", actorId)
+
 	if err := handle.SetDriverState(&driverState); err != nil {
+		taskCancel()
+		d.logger.Error("failed to start task, error setting driver state", "error", err)
 		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
 	}
-	fmt.Fprintf(stdout, "driver state set - %+v\n", driverConfig)
+	fmt.Fprintf(stdout, "driver state set - %s\n", actorId)
+
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
+
 	return handle, nil, nil
 }
 
@@ -502,20 +508,25 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	// In the example below we use the executor to re-attach to the process
 	// that was created when the task first started.
 	actorId := driverConfig.ActorName + "_" + strings.ReplaceAll(handle.Config.AllocID, "-", "")
-	_, err = d.client.RunTask(d.ctx, driverConfig, actorId)
+
+	taskCtx, taskCancel := context.WithCancel(context.Background())
+
+	_, err = d.client.RunTask(taskCtx, driverConfig, actorId)
 	if err != nil {
+		taskCancel()
 		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
 		return nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
 	fmt.Fprintf(stdout, "task started - %s\n", actorId)
+
 	h := &taskHandle{
 		ActorID:      taskState.ActorID,
 		taskConfig:   taskState.TaskConfig,
 		procState:    drivers.TaskStateRunning,
 		startedAt:    taskState.StartedAt,
 		exitResult:   &drivers.ExitResult{},
-		ctx:          d.ctx,
-		cancel:       d.signalShutdown,
+		ctx:          taskCtx,
+		cancel:       taskCancel,
 		logger:       d.logger,
 		doneCh:       make(chan struct{}),
 		driverConfig: driverConfig,
@@ -559,20 +570,25 @@ func (d *RayDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch
 	// In the example below we block and wait until the executor finishes
 	// running, at which point we send the exit code and signal in the result
 	// channel.
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-d.ctx.Done():
-			return
-		case <-handle.doneCh:
-			result = &drivers.ExitResult{
-				ExitCode: handle.exitResult.ExitCode,
-				Signal:   handle.exitResult.Signal,
-				Err:      handle.exitResult.Err,
-			}
-		case ch <- result:
+	select {
+	case <-ctx.Done():
+		return
+	case <-d.ctx.Done():
+		return
+	case <-handle.doneCh:
+		result = &drivers.ExitResult{
+			ExitCode: handle.exitResult.ExitCode,
+			Signal:   handle.exitResult.Signal,
+			Err:      handle.exitResult.Err,
 		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-d.ctx.Done():
+		return
+	case ch <- result:
 	}
 }
 
