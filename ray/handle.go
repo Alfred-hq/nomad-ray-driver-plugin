@@ -95,52 +95,52 @@ func (h *taskHandle) run() {
 		}
 	}()
 	fmt.Fprintf(stdout, "task handle run - %s\n", h.ActorID)
-	// client := rayRestClient{
-	// 	rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
-	// }
+	client := rayRestClient{
+		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
+	}
 
-	// for {
-	// 	fmt.Fprintf(stdout, "getting actor status - %s\n")
-	// 	status, err := client.GetActorStatusCLI(h.ctx, h.ActorID)
-	// 	if err != nil {
-	// 		fmt.Fprintf(stdout, "Error retrieving actor status: %v\n", err)
-	// 		h.handleRunError(err, "Error retrieving actor status")
-	// 		return
-	// 	}
+	for {
+		fmt.Fprintf(stdout, "getting actor status\n")
+		status, err := client.GetActorStatusCLI(h.ctx, h.ActorID)
+		if err != nil {
+			fmt.Fprintf(stdout, "Error retrieving actor status: %v\n", err)
+			h.handleRunError(err, "Error retrieving actor status")
+			return
+		}
 
-	// 	fmt.Fprintf(stdout, "Actor Status: %s\n", status)
+		fmt.Fprintf(stdout, "Actor Status: %s\n", status)
 
-	// 	if h.driverConfig.MemoryMonitoring.Enabled {
-	// 		fmt.Fprintf(stdout, "Fetching memory usage\n")
-	// 		memory, err := client.GetActorMemory(h.ctx, h.driverConfig.MemoryMonitoring.MetricsEndpoint, h.ActorID)
-	// 		if err != nil {
-	// 			fmt.Fprintf(stdout, "Error retrieving actor memory: %v\n", err)
-	// 		} else if memory > h.driverConfig.MemoryMonitoring.MemoryThreshold {
-	// 			fmt.Fprintf(stdout, "Memory usage %d MB exceeds threshold of %d MB\n",
-	// 				memory, h.driverConfig.MemoryMonitoring.MemoryThreshold)
-	// 			h.handleRunError(fmt.Errorf("memory threshold exceeded"), "Memory usage above threshold")
-	// 			return
-	// 		}
-	// 	}
+		if h.driverConfig.MemoryMonitoring.Enabled {
+			fmt.Fprintf(stdout, "Fetching memory usage\n")
+			memory, err := client.GetActorMemory(h.ctx, h.driverConfig.MemoryMonitoring.MetricsEndpoint, h.ActorID)
+			if err != nil {
+				fmt.Fprintf(stdout, "Error retrieving actor memory: %v\n", err)
+			} else if memory > h.driverConfig.MemoryMonitoring.MemoryThreshold {
+				fmt.Fprintf(stdout, "Memory usage %d MB exceeds threshold of %d MB\n",
+					memory, h.driverConfig.MemoryMonitoring.MemoryThreshold)
+				h.handleRunError(fmt.Errorf("memory threshold exceeded"), "Memory usage above threshold")
+				return
+			}
+		}
 
-	// 	fmt.Fprintf(stdout, "Actor is healthy, fetching logs\n")
-	// 	actorLogs, err := client.GetActorLogsCLI(h.ctx, h.ActorID)
-	// 	if err != nil {
-	// 		fmt.Fprintf(stdout, "Error retrieving actor logs: %v\n", err)
-	// 		h.handleRunError(err, "Error retrieving actor logs")
-	// 		return
-	// 	}
+		fmt.Fprintf(stdout, "Actor is healthy, fetching logs\n")
+		actorLogs, err := client.GetActorLogsCLI(h.ctx, h.ActorID)
+		if err != nil {
+			fmt.Fprintf(stdout, "Error retrieving actor logs: %v\n", err)
+			h.handleRunError(err, "Error retrieving actor logs")
+			return
+		}
 
-	// 	select {
-	// 	case <-time.After(10 * time.Second):
-	// 		now := time.Now().Format(time.RFC3339)
-	// 		fmt.Fprintf(stdout, "[%s] Actor logs:\n%s\n", now, actorLogs)
-	// 	case <-h.ctx.Done():
-	// 		fmt.Fprintf(stdout, "Context cancelled, shutting down...\n")
-	// 		h.handleRunError(h.ctx.Err(), "Context cancelled")
-	// 		return
-	// 	}
-	// }
+		select {
+		case <-time.After(10 * time.Second):
+			now := time.Now().Format(time.RFC3339)
+			fmt.Fprintf(stdout, "[%s] Actor logs:\n%s\n", now, actorLogs)
+		case <-h.ctx.Done():
+			fmt.Fprintf(stdout, "Context cancelled, shutting down...\n")
+			h.handleRunError(h.ctx.Err(), "Context cancelled")
+			return
+		}
+	}
 }
 
 func (h *taskHandle) handleRunError(err error, context string) {
