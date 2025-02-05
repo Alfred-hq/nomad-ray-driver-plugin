@@ -137,7 +137,7 @@ func (h *taskHandle) run() {
 			fmt.Fprintf(stdout, "[%s] Actor logs:\n%s\n", now, actorLogs)
 		case <-h.ctx.Done():
 			fmt.Fprintf(stdout, "Context cancelled, shutting down...\n")
-			h.handleRunError(h.ctx.Err(), "Context cancelled")
+			// h.handleRunError(h.ctx.Err(), "Context cancelled")
 			return
 		}
 	}

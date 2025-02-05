@@ -609,12 +609,23 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 	}
 	fmt.Fprintf(stdout, "stopping task with detach mode - %t \n", signal == drivers.DetachSignal)
 
+	handle.stateLock.Lock()
+	handle.cancel()
+	handle.stateLock.Unlock()
+
 	actorId := handle.ActorID
 
 	_, err = d.client.DeleteActor(d.ctx, actorId)
 
 	if err != nil {
 		fmt.Fprintf(stdout, "failed to stop remote task [%s] - [%s] \n", actorId, err)
+	}
+
+	select {
+	case <-handle.doneCh:
+		fmt.Fprintf(stdout, "task stopped gracefully - [%s]\n", actorId)
+	case <-time.After(timeout):
+		fmt.Fprintf(stdout, "task did not stop within timeout - [%s]\n", actorId)
 	}
 
 	fmt.Fprintf(stdout, "remote task stopped - [%s]\n", actorId)
