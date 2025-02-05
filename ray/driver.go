@@ -615,7 +615,7 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 
 	actorId := handle.ActorID
 
-	_, err = d.client.DeleteActor(d.ctx, actorId)
+	_, err = d.client.DeleteActorCLI(d.ctx, actorId)
 
 	if err != nil {
 		fmt.Fprintf(stdout, "failed to stop remote task [%s] - [%s] \n", actorId, err)

@@ -113,6 +113,7 @@ func (h *taskHandle) run() {
 		if h.driverConfig.MemoryMonitoring.Enabled {
 			fmt.Fprintf(stdout, "Fetching memory usage\n")
 			memory, err := client.GetActorMemory(h.ctx, h.driverConfig.MemoryMonitoring.MetricsEndpoint, h.ActorID)
+			fmt.Fprintf(stdout, "Current memory usage: %d\n", memory)
 			if err != nil {
 				fmt.Fprintf(stdout, "Error retrieving actor memory: %v\n", err)
 			} else if memory > h.driverConfig.MemoryMonitoring.MemoryThreshold {
