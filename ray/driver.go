@@ -457,7 +457,7 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 	if err := handle.SetDriverState(&driverState); err != nil {
 		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
 	}
-	fmt.Fprintf(stdout, "driver state set - %s\n", actorId)
+	fmt.Fprintf(stdout, "driver state set - %+v\n", driverConfig)
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
 	return handle, nil, nil
