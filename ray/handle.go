@@ -62,7 +62,7 @@ func (h *taskHandle) stopTask() error {
 	if err != nil {
 		return fmt.Errorf("failed to open task stdout path")
 	} else {
-		defer stdout.Close()
+
 	}
 	client := rayRestClient{
 		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,

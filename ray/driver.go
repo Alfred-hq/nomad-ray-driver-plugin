@@ -423,7 +423,6 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 		d.logger.Error("failed to open stdout writer", "error", err)
 		return nil, nil, fmt.Errorf("failed to open FIFO writer: %v", err)
 	}
-	defer stdout.Close()
 
 	fmt.Fprintf(stdout, "starting task\n")
 
@@ -477,8 +476,6 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	stdout, err := fifo.OpenWriter(handle.Config.StdoutPath)
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
-	} else {
-		defer stdout.Close()
 	}
 
 	fmt.Fprintf(stdout, "recovering task - %s\n", handle.Config.ID)
@@ -547,8 +544,6 @@ func (d *RayDriverPlugin) WaitTask(ctx context.Context, taskID string) (<-chan *
 	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
-	} else {
-		defer stdout.Close()
 	}
 	fmt.Fprintf(stdout, "inside wait task \n")
 	ch := make(chan *drivers.ExitResult)
@@ -611,8 +606,6 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
-	} else {
-		defer stdout.Close()
 	}
 	fmt.Fprintf(stdout, "stopping task with detach mode - %t \n", signal == drivers.DetachSignal)
 
@@ -651,8 +644,6 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
-	} else {
-		defer stdout.Close()
 	}
 	fmt.Fprintf(stdout, "running destroy task, with force mode - %t \n", force)
 
@@ -735,8 +726,6 @@ func (d *RayDriverPlugin) SignalTask(taskID string, signal string) error {
 	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
-	} else {
-		defer stdout.Close()
 	}
 	fmt.Fprintf(stdout, "%s signal received, deleting task \n", signal)
 
