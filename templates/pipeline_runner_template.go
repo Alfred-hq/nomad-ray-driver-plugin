@@ -31,7 +31,7 @@ async def shutdown(loop, signal=None):
 
 
 @ray.remote(max_restarts={{.MaxActorRestarts}}, max_task_retries={{.MaxTaskRetries}})
-class {{.ActorName}}:
+class {{.ActorID}}:
     async def runner(self):
         # Start both tasks
         directory_path = os.path.dirname(\"{{.PipelineFilePath}}\")
@@ -60,7 +60,7 @@ async def main():
     # Initialize connection to the Ray head node on the default port.
     ray.init(address=\"auto\", namespace=\"{{.Namespace}}\")
 
-    pipeline_runner = {{.ActorName}}.options(name=\"{{.ActorName}}\", lifetime=\"detached\", max_concurrency=2, num_cpus={{.NumCpu}}).remote()
+    pipeline_runner = {{.ActorID}}.options(name=\"{{.ActorID}}\", lifetime=\"detached\", max_concurrency=2, num_cpus={{.NumCpu}}).remote()
     
     uvloop.install()
     loop = asyncio.get_event_loop()
@@ -84,7 +84,7 @@ ray.init(address=\"auto\", namespace=\"{{.Namespace}}\", runtime_env={\"RAY_ENAB
 def main():
     try:
         # Get the actor
-        actor = ray.get_actor(\"{{.ActorName}}\")
+        actor = ray.get_actor(\"{{.ActorID}}\")
         actor.runner.remote()
     except Exception as e:
         print(e)

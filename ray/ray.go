@@ -210,7 +210,16 @@ func (c rayRestClient) RunTask(ctx context.Context, cfg TaskConfig, actorId stri
 	actorStatus, err := c.GetActorStatusCLI(ctx, actorId)
 
 	if actorStatus != "ALIVE" || err != nil {
-		scriptContent, err := generateScript(templates.RayActorTemplate, cfg)
+		// Create a combined config struct that includes both cfg and actorId
+		config := struct {
+			TaskConfig
+			ActorID string
+		}{
+			TaskConfig: cfg,
+			ActorID:    actorId,
+		}
+
+		scriptContent, err := generateScript(templates.RayActorTemplate, config)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate script: %w", err)
 		}
@@ -224,7 +233,7 @@ func (c rayRestClient) RunTask(ctx context.Context, cfg TaskConfig, actorId stri
 
 		time.Sleep(20 * time.Second)
 
-		scriptContent, err = generateScript(templates.RemoteRunnerTemplate, cfg)
+		scriptContent, err = generateScript(templates.RemoteRunnerTemplate, config)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate runner script: %w", err)
 		}
