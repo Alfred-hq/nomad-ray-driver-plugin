@@ -61,8 +61,6 @@ func (h *taskHandle) stopTask() error {
 	stdout, err := fifo.OpenWriter(h.taskConfig.StdoutPath)
 	if err != nil {
 		return fmt.Errorf("failed to open task stdout path")
-	} else {
-
 	}
 	client := rayRestClient{
 		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
@@ -88,12 +86,6 @@ func (h *taskHandle) run() {
 		h.handleRunError(err, "failed to open task stdout path")
 		return
 	}
-	defer func() {
-		if err := stdout.Close(); err != nil {
-			fmt.Fprintf(stdout, "failed to close task stdout handle correctly")
-			h.logger.Error("failed to close task stdout handle correctly", "error", err)
-		}
-	}()
 	fmt.Fprintf(stdout, "task handle run - %s\n", h.ActorID)
 	client := rayRestClient{
 		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
@@ -153,5 +145,16 @@ func (h *taskHandle) handleRunError(err error, context string) {
 	h.exitResult.ExitCode = 1
 	h.exitResult.Signal = 0
 	h.exitResult.Err = fmt.Errorf("%s: %v", context, err)
+}
+
+func (h *taskHandle) stop() {
+	h.stateLock.Lock()
+	defer h.stateLock.Unlock()
 	h.cancel()
 }
+
+//TODO:
+// 1. use a common util to log, avoid calling OpenWriter multiple times
+// 2. use stderr for logging errors
+// 3. collect ray sterr logs
+// 4. remove hard coded ray endpoints (10001 and 6379) and namespace

@@ -475,14 +475,13 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	}
 	stdout, err := fifo.OpenWriter(handle.Config.StdoutPath)
 	if err != nil {
-		d.logger.Error("failed to open stdout writer", "error", err)
+		return fmt.Errorf("failed to open writer while recovering task")
 	}
 
 	fmt.Fprintf(stdout, "recovering task - %s\n", handle.Config.ID)
 
 	if _, ok := d.tasks.Get(handle.Config.ID); ok {
-		fmt.Fprintf(stdout, "no task to recover; task already exists - %s\n", handle.Config.Name)
-		return nil
+		return fmt.Errorf("no task to recover; task already exists")
 	}
 
 	var taskState TaskState
@@ -609,17 +608,11 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 	}
 	fmt.Fprintf(stdout, "stopping task with detach mode - %t \n", signal == drivers.DetachSignal)
 
-	handle.stateLock.Lock()
-	handle.cancel()
-	handle.stateLock.Unlock()
+	handle.stop()
 
 	actorId := handle.ActorID
 
-	_, err = d.client.DeleteActorCLI(d.ctx, actorId)
-
-	if err != nil {
-		fmt.Fprintf(stdout, "failed to stop remote task [%s] - [%s] \n", actorId, err)
-	}
+	handle.stopTask()
 
 	select {
 	case <-handle.doneCh:
@@ -656,9 +649,23 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
 	}
-	fmt.Fprintf(stdout, "running destroy task, with force mode - %t \n", force)
+	fmt.Fprintf(stdout, "running destroy task, with force mode - %t\n", force)
 
+	// First stop the task and wait for cleanup
+	handle.stop()
+
+	// Wait for run() goroutine to finish cleanup
+	select {
+	case <-handle.doneCh:
+		fmt.Fprintf(stdout, "task cleanup completed - [%s]\n", taskID)
+	case <-time.After(30 * time.Second):
+		fmt.Fprintf(stdout, "timeout waiting for task cleanup - [%s]\n", taskID)
+	}
+
+	// Now safe to remove from task store
 	d.tasks.Delete(taskID)
+
+	fmt.Fprintf(stdout, "task destroyed - [%s]\n", taskID)
 	return nil
 }
 
