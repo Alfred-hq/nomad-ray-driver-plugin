@@ -418,22 +418,27 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 	// greeter. The executor is then stored in the handle so we can access it
 	// later and the the plugin.Client is used to generate a reattach
 	// configuration that can be used to recover communication with the task.
+	d.logger.Info("Opening stdout", "path", cfg.StdoutPath)
 	stdout, err := fifo.OpenWriter(cfg.StdoutPath)
 	if err != nil {
-		d.logger.Error("failed to open stdout writer", "error", err)
+		d.logger.Error("failed to open stdout writer", "error", err, "path", cfg.StdoutPath)
 		return nil, nil, fmt.Errorf("failed to open FIFO writer: %v", err)
 	}
+	defer stdout.Close()
 
-	fmt.Fprintf(stdout, "starting task\n")
+	fmt.Fprintf(stdout, "Starting task\n")
 
 	taskCtx, taskCancel := context.WithCancel(context.Background())
 
+	d.logger.Info("Submitting Job to Ray")
 	_, err = d.client.RunTask(taskCtx, driverConfig, actorId)
 	if err != nil {
 		taskCancel()
+		d.logger.Error("Failed to start Ray task", "error", err)
 		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
 		return nil, nil, nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
+	d.logger.Info("Job submitted to Ray")
 	fmt.Fprintf(stdout, "task started - %s\n", actorId)
 
 	h := &taskHandle{
@@ -461,7 +466,7 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
 	}
 	fmt.Fprintf(stdout, "driver state set - %s\n", actorId)
-
+	d.logger.Info("Setting task handle")
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
 
@@ -566,10 +571,13 @@ func (d *RayDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch
 	// channel.
 	select {
 	case <-ctx.Done():
+		d.logger.Debug("Context cancelled in handleWait")
 		return
 	case <-d.ctx.Done():
+		d.logger.Debug("Driver context cancelled in handleWait")
 		return
 	case <-handle.doneCh:
+		d.logger.Debug("Task completed normally via doneCh")
 		result = &drivers.ExitResult{
 			ExitCode: handle.exitResult.ExitCode,
 			Signal:   handle.exitResult.Signal,
@@ -592,7 +600,6 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 	if !ok {
 		return drivers.ErrTaskNotFound
 	}
-
 	// TODO: implement driver specific logic to stop a task.
 	//
 	// The StopTask function is expected to stop a running task by sending the
@@ -602,22 +609,26 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 	// In the example below we let the executor handle the task shutdown
 	// process for us, but you might need to customize this for your own
 	// implementation.
+	d.logger.Info("Stopping task", "task_id", taskID, "timeout", timeout, "signal", signal)
 	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
 	}
-	fmt.Fprintf(stdout, "stopping task with detach mode - %t \n", signal == drivers.DetachSignal)
+	fmt.Fprintf(stdout, "stopping task with detach mode - %t\n", signal == drivers.DetachSignal)
 
+	d.logger.Info("Calling handle.stop()", "task_id", taskID)
 	handle.stop()
 
 	actorId := handle.ActorID
-
+	d.logger.Info("Calling handle.stopTask()", "task_id", taskID, "actor_id", actorId)
 	handle.stopTask()
 
 	select {
 	case <-handle.doneCh:
+		d.logger.Info("Task stopped gracefully", "task_id", taskID)
 		fmt.Fprintf(stdout, "task stopped gracefully - [%s]\n", actorId)
 	case <-time.After(timeout):
+		d.logger.Warn("Task did not stop within timeout", "task_id", taskID, "timeout", timeout)
 		fmt.Fprintf(stdout, "task did not stop within timeout - [%s]\n", actorId)
 	}
 

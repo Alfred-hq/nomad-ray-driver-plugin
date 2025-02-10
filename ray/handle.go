@@ -68,13 +68,19 @@ func (h *taskHandle) stopTask() error {
 	_, err = client.DeleteActorCLI(h.ctx, h.ActorID)
 	if err != nil {
 		fmt.Fprintf(stdout, "Error deleting actor: %v\n", err)
+	} else {
+		fmt.Fprintf(stdout, "remote task stopped - [%s]\n", h.ActorID)
 	}
-	fmt.Fprintf(stdout, "remote task stopped - [%s]\n", h.ActorID)
 	return nil
 }
 
 func (h *taskHandle) run() {
-	defer close(h.doneCh)
+	h.logger.Info("Starting run goroutine", "actor_id", h.ActorID)
+	defer func() {
+		h.logger.Info("Closing doneCh", "actor_id", h.ActorID)
+		close(h.doneCh)
+	}()
+
 	h.stateLock.Lock()
 	if h.exitResult == nil {
 		h.exitResult = &drivers.ExitResult{}
@@ -83,14 +89,21 @@ func (h *taskHandle) run() {
 
 	stdout, err := fifo.OpenWriter(h.taskConfig.StdoutPath)
 	if err != nil {
+		h.logger.Error("Failed to open stdout", "error", err, "path", h.taskConfig.StdoutPath)
 		h.handleRunError(err, "failed to open task stdout path")
 		return
 	}
+	defer func() {
+		if err := stdout.Close(); err != nil {
+			h.logger.Error("Failed to close stdout", "error", err)
+		}
+	}()
+
 	fmt.Fprintf(stdout, "task handle run - %s\n", h.ActorID)
 	client := rayRestClient{
 		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
 	}
-
+	h.logger.Info("Running in infinite loop")
 	for {
 		fmt.Fprintf(stdout, "getting actor status\n")
 		status, err := client.GetActorStatusCLI(h.ctx, h.ActorID)
