@@ -69,7 +69,7 @@ func (h *taskHandle) stopTask() error {
 	if err != nil {
 		fmt.Fprintf(stdout, "Error deleting actor: %v\n", err)
 	} else {
-		fmt.Fprintf(stdout, "remote task stopped - [%s]\n", h.ActorID)
+		fmt.Fprintf(stdout, "Ray actor deleted - [%s]\n", h.ActorID)
 	}
 	return nil
 }

@@ -609,30 +609,29 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 	// In the example below we let the executor handle the task shutdown
 	// process for us, but you might need to customize this for your own
 	// implementation.
-	d.logger.Info("Stopping task", "task_id", taskID, "timeout", timeout, "signal", signal)
+	d.logger.Info("Stopping task", "timeout", timeout, "signal", signal)
 	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
 	if err != nil {
 		d.logger.Error("failed to open stdout writer", "error", err)
 	}
 	fmt.Fprintf(stdout, "stopping task with detach mode - %t\n", signal == drivers.DetachSignal)
 
-	d.logger.Info("Calling handle.stop()", "task_id", taskID)
-	handle.stop()
-
-	actorId := handle.ActorID
-	d.logger.Info("Calling handle.stopTask()", "task_id", taskID, "actor_id", actorId)
+	d.logger.Info("Calling handle.stopTask()")
 	handle.stopTask()
+
+	d.logger.Info("Calling handle.stop()")
+	handle.stop()
 
 	select {
 	case <-handle.doneCh:
-		d.logger.Info("Task stopped gracefully", "task_id", taskID)
-		fmt.Fprintf(stdout, "task stopped gracefully - [%s]\n", actorId)
+		d.logger.Info("Task stopped gracefully")
+		fmt.Fprintf(stdout, "task stopped gracefully\n")
 	case <-time.After(timeout):
-		d.logger.Warn("Task did not stop within timeout", "task_id", taskID, "timeout", timeout)
-		fmt.Fprintf(stdout, "task did not stop within timeout - [%s]\n", actorId)
+		d.logger.Warn("Task did not stop within timeout")
+		fmt.Fprintf(stdout, "task did not stop within timeout\n")
 	}
 
-	fmt.Fprintf(stdout, "remote task stopped - [%s]\n", actorId)
+	fmt.Fprintf(stdout, "task stopped - [%s]\n", handle.ActorID)
 
 	return nil
 }
