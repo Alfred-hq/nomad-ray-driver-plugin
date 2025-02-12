@@ -162,7 +162,11 @@ func (h *taskHandle) stop() {
 		h.completedAt = time.Now()
 		h.procState = drivers.TaskStateExited
 	}
+}
 
+func (h *taskHandle) closeStdoutStream() {
+	h.stateLock.Lock()
+	defer h.stateLock.Unlock()
 	if h.stdoutLogger != nil {
 		h.stdoutLogger.Close()
 		h.stdoutLogger = nil

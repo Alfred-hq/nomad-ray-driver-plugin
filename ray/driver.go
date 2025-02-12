@@ -627,6 +627,7 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 	}
 
 	fmt.Fprintf(stdout, "task stopped - [%s]\n", handle.ActorID)
+	handle.closeStdoutStream()
 
 	return nil
 }
@@ -650,7 +651,11 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	//
 	// In the example below we use the executor to force shutdown the task
 	// (timeout equals 0).
-	stdout := handle.stdoutLogger
+	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
+	if err != nil {
+		d.logger.Error("failed to open stdout writer", "error", err)
+	}
+	defer stdout.Close()
 	d.logger.Info("running destroy task", "actor_id", handle.ActorID)
 	fmt.Fprintf(stdout, "running destroy task, with force mode - %t\n", force)
 
@@ -669,6 +674,7 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	d.tasks.Delete(taskID)
 	d.logger.Info("task destroyed", "actor_id", handle.ActorID)
 	fmt.Fprintf(stdout, "task destroyed - [%s]\n", taskID)
+	handle.closeStdoutStream()
 	return nil
 }
 
