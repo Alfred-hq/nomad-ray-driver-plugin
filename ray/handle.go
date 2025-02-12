@@ -6,11 +6,11 @@ package ray
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
-	"github.com/hashicorp/nomad/client/lib/fifo"
 	"github.com/hashicorp/nomad/plugins/drivers"
 )
 
@@ -32,6 +32,7 @@ type taskHandle struct {
 	ActorID      string
 	ctx          context.Context
 	cancel       context.CancelFunc
+	stdoutLogger io.WriteCloser
 }
 
 func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
@@ -58,14 +59,11 @@ func (h *taskHandle) IsRunning() bool {
 }
 
 func (h *taskHandle) stopTask() error {
-	stdout, err := fifo.OpenWriter(h.taskConfig.StdoutPath)
-	if err != nil {
-		return fmt.Errorf("failed to open task stdout path")
-	}
+	stdout := h.stdoutLogger
 	client := rayRestClient{
 		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
 	}
-	_, err = client.DeleteActorCLI(h.ctx, h.ActorID)
+	_, err := client.DeleteActorCLI(h.ctx, h.ActorID)
 	if err != nil {
 		fmt.Fprintf(stdout, "Error deleting actor: %v\n", err)
 	} else {
@@ -87,52 +85,40 @@ func (h *taskHandle) run() {
 	}
 	h.stateLock.Unlock()
 
-	stdout, err := fifo.OpenWriter(h.taskConfig.StdoutPath)
-	if err != nil {
-		h.logger.Error("Failed to open stdout", "error", err, "path", h.taskConfig.StdoutPath)
-		h.handleRunError(err, "failed to open task stdout path")
-		return
-	}
-	defer func() {
-		if err := stdout.Close(); err != nil {
-			h.logger.Error("Failed to close stdout", "error", err)
-		}
-	}()
-
-	fmt.Fprintf(stdout, "task handle run - %s\n", h.ActorID)
+	fmt.Fprintf(h.stdoutLogger, "task handle run - %s\n", h.ActorID)
 	client := rayRestClient{
 		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
 	}
-	h.logger.Info("Running in infinite loop")
+	h.logger.Info("Running in infinite loop", "actor_id", h.ActorID)
 	for {
-		fmt.Fprintf(stdout, "getting actor status\n")
+		fmt.Fprintf(h.stdoutLogger, "getting actor status\n")
 		status, err := client.GetActorStatusCLI(h.ctx, h.ActorID)
 		if err != nil {
-			fmt.Fprintf(stdout, "Error retrieving actor status: %v\n", err)
+			fmt.Fprintf(h.stdoutLogger, "Error retrieving actor status: %v\n", err)
 			h.handleRunError(err, "Error retrieving actor status")
 			return
 		}
 
-		fmt.Fprintf(stdout, "Actor Status: %s\n", status)
+		fmt.Fprintf(h.stdoutLogger, "Actor Status: %s\n", status)
 
 		if h.driverConfig.MemoryMonitoring.Enabled {
-			fmt.Fprintf(stdout, "Fetching memory usage\n")
+			fmt.Fprintf(h.stdoutLogger, "Fetching memory usage\n")
 			memory, err := client.GetActorMemory(h.ctx, h.driverConfig.MemoryMonitoring.MetricsEndpoint, h.ActorID)
-			fmt.Fprintf(stdout, "Current memory usage: %d\n", memory)
+			fmt.Fprintf(h.stdoutLogger, "Current memory usage: %d\n", memory)
 			if err != nil {
-				fmt.Fprintf(stdout, "Error retrieving actor memory: %v\n", err)
+				fmt.Fprintf(h.stdoutLogger, "Error retrieving actor memory: %v\n", err)
 			} else if memory > h.driverConfig.MemoryMonitoring.MemoryThreshold {
-				fmt.Fprintf(stdout, "Memory usage %d MB exceeds threshold of %d MB\n",
+				fmt.Fprintf(h.stdoutLogger, "Memory usage %d MB exceeds threshold of %d MB\n",
 					memory, h.driverConfig.MemoryMonitoring.MemoryThreshold)
 				h.handleRunError(fmt.Errorf("memory threshold exceeded"), "Memory usage above threshold")
 				return
 			}
 		}
 
-		fmt.Fprintf(stdout, "Actor is healthy, fetching logs\n")
+		fmt.Fprintf(h.stdoutLogger, "Actor is healthy, fetching logs\n")
 		actorLogs, err := client.GetActorLogsCLI(h.ctx, h.ActorID)
 		if err != nil {
-			fmt.Fprintf(stdout, "Error retrieving actor logs: %v\n", err)
+			fmt.Fprintf(h.stdoutLogger, "Error retrieving actor logs: %v\n", err)
 			h.handleRunError(err, "Error retrieving actor logs")
 			return
 		}
@@ -140,9 +126,9 @@ func (h *taskHandle) run() {
 		select {
 		case <-time.After(10 * time.Second):
 			now := time.Now().Format(time.RFC3339)
-			fmt.Fprintf(stdout, "[%s] Actor logs:\n%s\n", now, actorLogs)
+			fmt.Fprintf(h.stdoutLogger, "[%s] Actor logs:\n%s\n", now, actorLogs)
 		case <-h.ctx.Done():
-			fmt.Fprintf(stdout, "Context cancelled, shutting down...\n")
+			fmt.Fprintf(h.stdoutLogger, "Context cancelled, shutting down...\n")
 			// h.handleRunError(h.ctx.Err(), "Context cancelled")
 			return
 		}
@@ -150,9 +136,12 @@ func (h *taskHandle) run() {
 }
 
 func (h *taskHandle) handleRunError(err error, context string) {
+	// Call stopTask first without holding the lock
+	h.stopTask()
+
 	h.stateLock.Lock()
 	defer h.stateLock.Unlock()
-	h.stopTask()
+
 	h.completedAt = time.Now()
 	h.procState = drivers.TaskStateExited
 	h.exitResult.ExitCode = 1
@@ -163,7 +152,15 @@ func (h *taskHandle) handleRunError(err error, context string) {
 func (h *taskHandle) stop() {
 	h.stateLock.Lock()
 	defer h.stateLock.Unlock()
-	h.cancel()
+
+	if h.cancel != nil {
+		h.cancel()
+	}
+
+	if h.stdoutLogger != nil {
+		h.stdoutLogger.Close()
+		h.stdoutLogger = nil
+	}
 }
 
 //TODO:
