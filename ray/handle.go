@@ -157,6 +157,12 @@ func (h *taskHandle) stop() {
 		h.cancel()
 	}
 
+	// Only update state if we're still running
+	if h.procState == drivers.TaskStateRunning {
+		h.completedAt = time.Now()
+		h.procState = drivers.TaskStateExited
+	}
+
 	if h.stdoutLogger != nil {
 		h.stdoutLogger.Close()
 		h.stdoutLogger = nil
