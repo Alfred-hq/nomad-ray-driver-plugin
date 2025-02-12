@@ -667,7 +667,7 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 
 	// Now safe to remove from task store
 	d.tasks.Delete(taskID)
-
+	d.logger.Info("task destroyed", "actor_id", handle.ActorID)
 	fmt.Fprintf(stdout, "task destroyed - [%s]\n", taskID)
 	return nil
 }

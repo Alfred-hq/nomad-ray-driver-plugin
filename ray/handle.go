@@ -164,7 +164,6 @@ func (h *taskHandle) stop() {
 }
 
 //TODO:
-// 1. use a common util to log, avoid calling OpenWriter multiple times
 // 2. use stderr for logging errors
 // 3. collect ray sterr logs
 // 4. remove hard coded ray endpoints (10001 and 6379) and namespace
