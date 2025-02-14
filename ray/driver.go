@@ -427,7 +427,7 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 
 	fmt.Fprintf(stdout, "Starting task\n")
 
-	taskCtx, taskCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	taskCtx, taskCancel := context.WithCancel(context.Background())
 
 	d.logger.Info("Submitting Job to Ray", "actor_id", actorId)
 	_, err = d.client.RunTask(taskCtx, driverConfig, actorId)
@@ -510,7 +510,7 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	// that was created when the task first started.
 	actorId := driverConfig.ActorName + "_" + strings.ReplaceAll(handle.Config.AllocID, "-", "")
 
-	taskCtx, taskCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	taskCtx, taskCancel := context.WithCancel(context.Background())
 
 	_, err = d.client.RunTask(taskCtx, driverConfig, actorId)
 	if err != nil {

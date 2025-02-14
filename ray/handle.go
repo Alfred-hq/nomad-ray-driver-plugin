@@ -63,16 +63,26 @@ func (h *taskHandle) stopTask() error {
 	client := rayRestClient{
 		rayClusterEndpoint: h.driverConfig.RayClusterEndpoint,
 	}
-	_, err := client.DeleteActorCLI(h.ctx, h.ActorID)
+	ctx, cancel := context.WithTimeout(h.ctx, 2*time.Minute)
+	defer cancel()
+
+	_, err := client.DeleteActorCLI(ctx, h.ActorID)
+
 	if err != nil {
-		if h.ctx.Err() == context.DeadlineExceeded {
-			fmt.Fprintf(stdout, "Timeout while deleting actor: %v\n", err)
+		if ctx.Err() == context.DeadlineExceeded {
+			// Local timeout (2 minutes) was reached
+			fmt.Fprintf(stdout, "Local timeout while deleting actor: %v\n", err)
+		} else if h.ctx.Err() != nil {
+			// Parent context was cancelled
+			fmt.Fprintf(stdout, "Parent context cancelled while deleting actor: %v\n", h.ctx.Err())
 		} else {
+			// Some other error occurred
 			fmt.Fprintf(stdout, "Error deleting actor: %v\n", err)
 		}
 	} else {
 		fmt.Fprintf(stdout, "Ray actor deleted successfully - [%s]\n", h.ActorID)
 	}
+
 	return nil
 }
 
