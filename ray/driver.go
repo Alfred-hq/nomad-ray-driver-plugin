@@ -651,9 +651,16 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	//
 	// In the example below we use the executor to force shutdown the task
 	// (timeout equals 0).
-	stdout := handle.stdoutLogger
+	stderr, err := fifo.OpenWriter(handle.taskConfig.StderrPath)
+	defer func() {
+		time.Sleep(5 * time.Second)
+		stderr.Close()
+	}()
+	if err != nil {
+		return fmt.Errorf("failed to open writer while destroying task")
+	}
 	d.logger.Info("running destroy task", "actor_id", handle.ActorID)
-	fmt.Fprintf(stdout, "running destroy task, with force mode - %t\n", force)
+	fmt.Fprintf(stderr, "running destroy task, with force mode - %t\n", force)
 
 	// First stop the task and wait for cleanup
 	handle.stop()
@@ -661,15 +668,15 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	// Wait for run() goroutine to finish cleanup
 	select {
 	case <-handle.doneCh:
-		fmt.Fprintf(stdout, "task cleanup completed - [%s]\n", taskID)
+		fmt.Fprintf(stderr, "task cleanup completed - [%s]\n", taskID)
 	case <-time.After(30 * time.Second):
-		fmt.Fprintf(stdout, "timeout waiting for task cleanup - [%s]\n", taskID)
+		fmt.Fprintf(stderr, "timeout waiting for task cleanup - [%s]\n", taskID)
 	}
 
 	// Now safe to remove from task store
 	d.tasks.Delete(taskID)
 	d.logger.Info("task destroyed", "actor_id", handle.ActorID)
-	fmt.Fprintf(stdout, "task destroyed - [%s]\n", taskID)
+	fmt.Fprintf(stderr, "task destroyed - [%s]\n", taskID)
 	handle.closeStdoutStream()
 	return nil
 }

@@ -179,9 +179,11 @@ func (h *taskHandle) stop() {
 }
 
 func (h *taskHandle) closeStdoutStream() {
-	h.stateLock.Lock()
-	defer h.stateLock.Unlock()
+
 	if h.stdoutLogger != nil {
+		time.Sleep(8 * time.Second)
+		h.stateLock.Lock()
+		defer h.stateLock.Unlock()
 		h.stdoutLogger.Close()
 		h.stdoutLogger = nil
 	}
