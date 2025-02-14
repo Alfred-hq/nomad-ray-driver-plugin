@@ -106,7 +106,7 @@ var (
 			hclspec.NewLiteral(`"http://localhost:8265"`),
 		),
 		"ray_api_endpoint": hclspec.NewDefault(
-			hclspec.NewAttr("ray_api_endpoint", "string", true),
+			hclspec.NewAttr("ray_api_endpoint", "string", false),
 			hclspec.NewLiteral(`"http://localhost:8000"`),
 		),
 		"namespace": hclspec.NewDefault(
