@@ -271,6 +271,9 @@ func (c rayRestClient) GetActorLogsCLI(ctx context.Context, actorID string) (str
 	command := fmt.Sprintf("ray list actors --address %s --filter 'state=ALIVE' | grep %s", rayAddress, actorID)
 	actorDetails, err := runCommand(ctx, command)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("timeout while getting actor details for logs: %v", err)
+		}
 		return "", fmt.Errorf("failed to fetch actor details: %v", err)
 	}
 
@@ -282,14 +285,15 @@ func (c rayRestClient) GetActorLogsCLI(ctx context.Context, actorID string) (str
 	id := parts[1] // Extract the actor ID (assumes it's the second part)
 
 	// Step 2: Fetch logs for the actor
-	// TODO: use varibale
 	logsCommand := fmt.Sprintf("ray logs actor --address localhost:6379 --id %s --tail 100", id)
 	logs, err := runCommand(ctx, logsCommand)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("timeout while fetching actor logs: %v", err)
+		}
 		return "", fmt.Errorf("failed to fetch actor logs: %v", err)
 	}
 
-	// Return the logs
 	return logs, nil
 }
 
@@ -299,6 +303,9 @@ func (c rayRestClient) GetActorStatusCLI(ctx context.Context, actorID string) (s
 	command := fmt.Sprintf("ray list actors --address %s --filter 'state=ALIVE' | grep %s", rayAddress, actorID)
 	actorDetails, err := runCommand(ctx, command)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("timeout while getting actor status: %v", err)
+		}
 		return "", fmt.Errorf("failed to fetch actor details: %v", err)
 	}
 
@@ -335,23 +342,33 @@ except Exception as e:
 	cmd := exec.CommandContext(ctx, "python3", "-c", pythonCode)
 	output, err := cmd.CombinedOutput()
 
-	// Check for errors and process the response
 	if err != nil {
-		// Non-zero exit code indicates failure
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("timeout while deleting actor: %w\nOutput: %s", err, strings.TrimSpace(string(output)))
+		}
 		return "", fmt.Errorf("failed to delete actor: %w\nOutput: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	// Success
 	return strings.TrimSpace(string(output)), nil
 }
 
 func (c rayRestClient) GetActorMemory(ctx context.Context, metricsEndpoint string, actorID string) (int64, error) {
-
 	// Append ".runner" to the actorID for metric matching
 	actorIDWithSuffix := fmt.Sprintf(`%s.runner`, actorID)
 
-	resp, err := http.Get(metricsEndpoint)
+	// Create request with context
+	req, err := http.NewRequestWithContext(ctx, "GET", metricsEndpoint, nil)
 	if err != nil {
+		return 0, fmt.Errorf("error creating request: %v", err)
+	}
+
+	// Use client.Do instead of http.Get
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return 0, fmt.Errorf("timeout while fetching metrics: %v", err)
+		}
 		return 0, fmt.Errorf("error fetching metrics: %v", err)
 	}
 	defer resp.Body.Close()
@@ -364,17 +381,24 @@ func (c rayRestClient) GetActorMemory(ctx context.Context, metricsEndpoint strin
 	metricRegex := regexp.MustCompile(regexPattern)
 
 	for scanner.Scan() {
-		line := scanner.Text()
-
-		// Find matching metric line
-		matches := metricRegex.FindStringSubmatch(line)
-		if len(matches) == 2 {
-			// Parse the matched value
-			value, err = strconv.ParseFloat(matches[1], 64)
-			if err != nil {
-				return 0, fmt.Errorf("error parsing value: %v", err)
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return 0, fmt.Errorf("timeout while scanning metrics output")
 			}
-			break
+			return 0, ctx.Err()
+		default:
+			line := scanner.Text()
+			// Find matching metric line
+			matches := metricRegex.FindStringSubmatch(line)
+			if len(matches) == 2 {
+				// Parse the matched value
+				value, err = strconv.ParseFloat(matches[1], 64)
+				if err != nil {
+					return 0, fmt.Errorf("error parsing value: %v", err)
+				}
+				break
+			}
 		}
 	}
 

@@ -65,9 +65,13 @@ func (h *taskHandle) stopTask() error {
 	}
 	_, err := client.DeleteActorCLI(h.ctx, h.ActorID)
 	if err != nil {
-		fmt.Fprintf(stdout, "Error deleting actor: %v\n", err)
+		if h.ctx.Err() == context.DeadlineExceeded {
+			fmt.Fprintf(stdout, "Timeout while deleting actor: %v\n", err)
+		} else {
+			fmt.Fprintf(stdout, "Error deleting actor: %v\n", err)
+		}
 	} else {
-		fmt.Fprintf(stdout, "Ray actor deleted - [%s]\n", h.ActorID)
+		fmt.Fprintf(stdout, "Ray actor deleted successfully - [%s]\n", h.ActorID)
 	}
 	return nil
 }

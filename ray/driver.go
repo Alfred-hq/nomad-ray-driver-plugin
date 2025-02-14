@@ -427,7 +427,7 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 
 	fmt.Fprintf(stdout, "Starting task\n")
 
-	taskCtx, taskCancel := context.WithCancel(context.Background())
+	taskCtx, taskCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
 	d.logger.Info("Submitting Job to Ray", "actor_id", actorId)
 	_, err = d.client.RunTask(taskCtx, driverConfig, actorId)
@@ -510,7 +510,7 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	// that was created when the task first started.
 	actorId := driverConfig.ActorName + "_" + strings.ReplaceAll(handle.Config.AllocID, "-", "")
 
-	taskCtx, taskCancel := context.WithCancel(context.Background())
+	taskCtx, taskCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
 	_, err = d.client.RunTask(taskCtx, driverConfig, actorId)
 	if err != nil {
@@ -651,11 +651,7 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	//
 	// In the example below we use the executor to force shutdown the task
 	// (timeout equals 0).
-	stdout, err := fifo.OpenWriter(handle.taskConfig.StdoutPath)
-	if err != nil {
-		d.logger.Error("failed to open stdout writer", "error", err)
-	}
-	defer stdout.Close()
+	stdout := handle.stdoutLogger
 	d.logger.Info("running destroy task", "actor_id", handle.ActorID)
 	fmt.Fprintf(stdout, "running destroy task, with force mode - %t\n", force)
 
