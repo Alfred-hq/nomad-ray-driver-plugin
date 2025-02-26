@@ -82,10 +82,10 @@ import pyroscope
 
 pyroscope.configure(
     application_name=\"{{.ActorID}}\",
-    server_address=addr,
+    server_address="http://localhost:4040",
     enable_logging=True,
-	detect_subprocesses = True,
-	gil_only=True,
+    detect_subprocesses = True,
+    gil_only=True,
 )
 ray.init(address=\"auto\", namespace=\"{{.Namespace}}\", runtime_env={\"RAY_ENABLE_RECORD_ACTOR_TASK_LOGGING\": 1})
 
