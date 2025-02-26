@@ -82,7 +82,7 @@ import pyroscope
 
 pyroscope.configure(
     application_name=\"{{.ActorID}}\",
-    server_address="http://localhost:4040",
+    server_address=\"http://localhost:4040\",
     enable_logging=True,
     detect_subprocesses = True,
     gil_only=True,
