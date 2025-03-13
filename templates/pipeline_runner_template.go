@@ -58,7 +58,7 @@ class {{.ActorID}}:
             )
         
         try:
-            loop.run_until_complete(start_task())
+            loop.run_until_complete(start_tasks())
         finally:
             print(f\"Killing actor due to failure in runner task\")
             loop.close()
