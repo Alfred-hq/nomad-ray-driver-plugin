@@ -136,11 +136,11 @@ func (h *taskHandle) run() {
 			h.handleRunError(err, "Error retrieving actor logs")
 			return
 		}
-
+		now := time.Now().Format(time.RFC3339)
+		fmt.Fprintf(h.stdoutLogger, "[%s] Actor logs:\n%s\n", now, actorLogs)
 		select {
-		case <-time.After(10 * time.Second):
-			now := time.Now().Format(time.RFC3339)
-			fmt.Fprintf(h.stdoutLogger, "[%s] Actor logs:\n%s\n", now, actorLogs)
+		case <-time.After(15 * time.Second):
+			fmt.Fprintf(h.stdoutLogger, "Wait of 15 seconds completed, continuing...\n")
 		case <-h.ctx.Done():
 			fmt.Fprintf(h.stdoutLogger, "Context cancelled, shutting down...\n")
 			// h.handleRunError(h.ctx.Err(), "Context cancelled")
