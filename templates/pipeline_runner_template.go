@@ -16,54 +16,43 @@ async def wait_for_interrupt():
     except asyncio.CancelledError:
         print(\"Interrupt received, canceling infinite loop...\")
 
-async def shutdown(loop, signal=int):
-    print(f\"Received signal {signal}, shutting down...\")
+async def shutdown(loop, signal=None):
+    if signal:
+        print(f\"Received exit signal {signal.name}...\")
+    
+    print(\"Shutting down...\")
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     for task in tasks:
         task.cancel()
-    print(f\"Cancelling {len(tasks)} outstanding tasks.\")    
+    print(f\"Cancelling {len(tasks)} outstanding tasks.\")
     await asyncio.gather(*tasks, return_exceptions=True)
     await loop.shutdown_asyncgens()
     loop.stop()
 
-async def start_tasks() -> None:
-    # Start both tasks
-    directory_path = os.path.dirname(\"{{.PipelineFilePath}}\")
-
-    # Get the file name without the extension
-    file_name = os.path.splitext(os.path.basename(\"{{.PipelineFilePath}}\"))[0]
-
-    sys.path.append(directory_path)
-
-    # Dynamically import the module
-    pipeline_module = importlib.import_module(file_name)
-
-    # Execute the pipeline function directly
-    task1 = asyncio.create_task(getattr(pipeline_module, \"{{.PipelineRunner}}\")())
-    task2 = asyncio.create_task(wait_for_interrupt())
-    await asyncio.gather(task1, task2)
-
 
 @ray.remote(max_restarts={{.MaxActorRestarts}}, max_task_retries={{.MaxTaskRetries}})
 class {{.ActorID}}:
-
     async def runner(self):
-        uvloop.install()
-        loop = asyncio.get_event_loop()
+        # Start both tasks
+        directory_path = os.path.dirname(\"{{.PipelineFilePath}}\")
 
-        # Register signal handlers
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(
-                sig, lambda s=sig: asyncio.create_task(shutdown(loop, s))
-            )
-        
+        # Get the file name without the extension
+        file_name = os.path.splitext(os.path.basename(\"{{.PipelineFilePath}}\"))[0]
+
+        sys.path.append(directory_path)
+
+        # Dynamically import the module
+        pipeline_module = importlib.import_module(file_name)
+
+        # Execute the pipeline function directly
+        task1 = asyncio.create_task(getattr(pipeline_module, \"{{.PipelineRunner}}\")())
+        task2 = asyncio.create_task(wait_for_interrupt())
         try:
-            loop.run_until_complete(start_tasks())
-        except Exception as e:
-            print(f\"Error in runner task: {e}\")
+            await asyncio.gather(task1, task2)
+        except asyncio.CancelledError:
+            pass
         finally:
             print(f\"Killing actor due to failure in runner task\")
-            loop.close()
             ray.actor.exit_actor()
 
 
@@ -72,10 +61,19 @@ async def main():
     ray.init(address=\"auto\", namespace=\"{{.Namespace}}\")
 
     pipeline_runner = {{.ActorID}}.options(name=\"{{.ActorID}}\", lifetime=\"detached\", max_concurrency=2, num_cpus={{.NumCpu}}).remote()
+    
+    uvloop.install()
+    loop = asyncio.get_event_loop()
+
+    # Register signal handlers
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(
+            sig, lambda s=sig: asyncio.create_task(shutdown(loop, s))
+            )
 
 
 if __name__ == \"__main__\":
-    main()
+    asyncio.run(main())
 `
 
 const RemoteRunnerTemplate = `
