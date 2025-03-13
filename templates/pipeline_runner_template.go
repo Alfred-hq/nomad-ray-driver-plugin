@@ -61,8 +61,8 @@ class {{.ActorID}}:
             loop.run_until_complete(start_task())
         finally:
             print(f\"Killing actor due to failure in runner task\")
+            loop.close()
             ray.actor.exit_actor()
-            // loop.close()
 
 
 async def main():
