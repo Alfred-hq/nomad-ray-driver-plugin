@@ -112,7 +112,7 @@ func (h *taskHandle) run() {
 			h.handleRunError(err, "Error retrieving actor status")
 			return
 		}
-
+		h.logger.Info("Actor Status", "actor_id", h.ActorID, "status", status)
 		fmt.Fprintf(h.stdoutLogger, "Actor Status: %s\n", status)
 
 		if h.driverConfig.MemoryMonitoring.Enabled {
@@ -143,6 +143,7 @@ func (h *taskHandle) run() {
 			fmt.Fprintf(h.stdoutLogger, "Wait of 15 seconds completed, continuing...\n")
 		case <-h.ctx.Done():
 			fmt.Fprintf(h.stdoutLogger, "Context cancelled, shutting down...\n")
+			h.logger.Info("Context cancelled, shutting down...", "actor_id", h.ActorID)
 			// h.handleRunError(h.ctx.Err(), "Context cancelled")
 			return
 		}
@@ -186,6 +187,7 @@ func (h *taskHandle) closeStdoutStream() {
 		defer h.stateLock.Unlock()
 		h.stdoutLogger.Close()
 		h.stdoutLogger = nil
+		time.Sleep(4 * time.Second)
 	}
 }
 
