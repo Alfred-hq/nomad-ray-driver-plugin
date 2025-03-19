@@ -435,6 +435,7 @@ func (d *RayDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandl
 		taskCancel()
 		d.logger.Error("Failed to start Ray task", "error", err)
 		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
+		stdout.Close()
 		return nil, nil, nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
 	d.logger.Info("Job submitted to Ray", "actor_id", actorId)
@@ -478,26 +479,17 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	if handle == nil {
 		return errors.New("error: handle cannot be nil")
 	}
-	stdout, err := fifo.OpenWriter(handle.Config.StdoutPath)
-	if err != nil {
-		return fmt.Errorf("failed to open writer while recovering task")
-	}
-
-	fmt.Fprintf(stdout, "recovering task - %s\n", handle.Config.ID)
-
 	if _, ok := d.tasks.Get(handle.Config.ID); ok {
 		return fmt.Errorf("no task to recover; task already exists")
 	}
 
 	var taskState TaskState
 	if err := handle.GetDriverState(&taskState); err != nil {
-		fmt.Fprintf(stdout, "failed to decode task state from handle: %v\n", err)
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
 	var driverConfig TaskConfig
 	if err := taskState.TaskConfig.DecodeDriverConfig(&driverConfig); err != nil {
-		fmt.Fprintf(stdout, "failed to decode driver config: %v\n", err)
 		return fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
@@ -508,6 +500,13 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	//
 	// In the example below we use the executor to re-attach to the process
 	// that was created when the task first started.
+	stdout, err := fifo.OpenWriter(handle.Config.StdoutPath)
+	if err != nil {
+		return fmt.Errorf("failed to open writer while recovering task")
+	}
+
+	fmt.Fprintf(stdout, "recovering task - %s\n", handle.Config.ID)
+
 	actorId := driverConfig.ActorName + "_" + strings.ReplaceAll(handle.Config.AllocID, "-", "")
 
 	taskCtx, taskCancel := context.WithCancel(context.Background())
@@ -515,6 +514,7 @@ func (d *RayDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	_, err = d.client.RunTask(taskCtx, driverConfig, actorId)
 	if err != nil {
 		taskCancel()
+		stdout.Close()
 		fmt.Fprintf(stdout, "failed to start task: %v\n", err)
 		return nstructs.NewRecoverableError(fmt.Errorf("failed to start ray task"), true)
 	}
@@ -570,13 +570,13 @@ func (d *RayDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch
 	// channel.
 	select {
 	case <-ctx.Done():
-		d.logger.Debug("Context cancelled in handleWait")
+		d.logger.Debug("Context cancelled in handleWait", "actor_id", handle.ActorID)
 		return
 	case <-d.ctx.Done():
-		d.logger.Debug("Driver context cancelled in handleWait")
+		d.logger.Debug("Driver context cancelled in handleWait", "actor_id", handle.ActorID)
 		return
 	case <-handle.doneCh:
-		d.logger.Debug("Task completed normally via doneCh")
+		d.logger.Debug("Task completed normally via doneCh", "actor_id", handle.ActorID)
 		result = &drivers.ExitResult{
 			ExitCode: handle.exitResult.ExitCode,
 			Signal:   handle.exitResult.Signal,
@@ -586,10 +586,13 @@ func (d *RayDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch
 
 	select {
 	case <-ctx.Done():
+		d.logger.Info("Context cancelled in handleWait", "actor_id", handle.ActorID)
 		return
 	case <-d.ctx.Done():
+		d.logger.Info("Driver context cancelled in handleWait", "actor_id", handle.ActorID)
 		return
 	case ch <- result:
+		d.logger.Info("Results sent on the channel in handleWait", "actor_id", handle.ActorID)
 	}
 }
 
@@ -660,6 +663,8 @@ func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 		return fmt.Errorf("failed to open writer while destroying task")
 	}
 	d.logger.Info("running destroy task", "actor_id", handle.ActorID)
+	now := time.Now().Format(time.RFC3339)
+	fmt.Fprintf(stderr, "%s", now)
 	fmt.Fprintf(stderr, "running destroy task, with force mode - %t\n", force)
 
 	// First stop the task and wait for cleanup

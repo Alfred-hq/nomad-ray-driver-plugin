@@ -105,47 +105,47 @@ func (h *taskHandle) run() {
 	}
 	h.logger.Info("Running in infinite loop", "actor_id", h.ActorID)
 	for {
-		fmt.Fprintf(h.stdoutLogger, "getting actor status\n")
-		status, err := client.GetActorStatusCLI(h.ctx, h.ActorID)
-		if err != nil {
-			fmt.Fprintf(h.stdoutLogger, "Error retrieving actor status: %v\n", err)
-			h.handleRunError(err, "Error retrieving actor status")
+		select {
+		case <-h.ctx.Done():
+			h.logger.Info("Context cancelled, shutting down...", "actor_id", h.ActorID)
+			fmt.Fprintf(h.stdoutLogger, "Context cancelled, shutting down...\n")
 			return
-		}
-		h.logger.Info("Actor Status", "actor_id", h.ActorID, "status", status)
-		fmt.Fprintf(h.stdoutLogger, "Actor Status: %s\n", status)
-
-		if h.driverConfig.MemoryMonitoring.Enabled {
-			fmt.Fprintf(h.stdoutLogger, "Fetching memory usage\n")
-			memory, err := client.GetActorMemory(h.ctx, h.driverConfig.MemoryMonitoring.MetricsEndpoint, h.ActorID)
-			fmt.Fprintf(h.stdoutLogger, "Current memory usage: %d\n", memory)
+		default:
+			fmt.Fprintf(h.stdoutLogger, "getting actor status\n")
+			status, err := client.GetActorStatusCLI(h.ctx, h.ActorID)
 			if err != nil {
-				fmt.Fprintf(h.stdoutLogger, "Error retrieving actor memory: %v\n", err)
-			} else if memory > h.driverConfig.MemoryMonitoring.MemoryThreshold {
-				fmt.Fprintf(h.stdoutLogger, "Memory usage %d MB exceeds threshold of %d MB\n",
-					memory, h.driverConfig.MemoryMonitoring.MemoryThreshold)
-				h.handleRunError(fmt.Errorf("memory threshold exceeded"), "Memory usage above threshold")
+				fmt.Fprintf(h.stdoutLogger, "Error retrieving actor status: %v\n", err)
+				h.handleRunError(err, "Error retrieving actor status")
 				return
 			}
-		}
+			h.logger.Info("Actor Status", "actor_id", h.ActorID, "status", status)
+			fmt.Fprintf(h.stdoutLogger, "Actor Status: %s\n", status)
 
-		fmt.Fprintf(h.stdoutLogger, "Actor is healthy, fetching logs\n")
-		actorLogs, err := client.GetActorLogsCLI(h.ctx, h.ActorID)
-		if err != nil {
-			fmt.Fprintf(h.stdoutLogger, "Error retrieving actor logs: %v\n", err)
-			h.handleRunError(err, "Error retrieving actor logs")
-			return
-		}
-		now := time.Now().Format(time.RFC3339)
-		fmt.Fprintf(h.stdoutLogger, "[%s] Actor logs:\n%s\n", now, actorLogs)
-		select {
-		case <-time.After(15 * time.Second):
-			fmt.Fprintf(h.stdoutLogger, "Wait of 15 seconds completed, continuing...\n")
-		case <-h.ctx.Done():
-			fmt.Fprintf(h.stdoutLogger, "Context cancelled, shutting down...\n")
-			h.logger.Info("Context cancelled, shutting down...", "actor_id", h.ActorID)
-			// h.handleRunError(h.ctx.Err(), "Context cancelled")
-			return
+			if h.driverConfig.MemoryMonitoring.Enabled {
+				fmt.Fprintf(h.stdoutLogger, "Fetching memory usage\n")
+				memory, err := client.GetActorMemory(h.ctx, h.driverConfig.MemoryMonitoring.MetricsEndpoint, h.ActorID)
+				fmt.Fprintf(h.stdoutLogger, "Current memory usage: %d\n", memory)
+				if err != nil {
+					fmt.Fprintf(h.stdoutLogger, "Error retrieving actor memory: %v\n", err)
+				} else if memory > h.driverConfig.MemoryMonitoring.MemoryThreshold {
+					fmt.Fprintf(h.stdoutLogger, "Memory usage %d MB exceeds threshold of %d MB\n",
+						memory, h.driverConfig.MemoryMonitoring.MemoryThreshold)
+					h.handleRunError(fmt.Errorf("memory threshold exceeded"), "Memory usage above threshold")
+					return
+				}
+			}
+
+			fmt.Fprintf(h.stdoutLogger, "Actor is healthy, fetching logs\n")
+			actorLogs, err := client.GetActorLogsCLI(h.ctx, h.ActorID)
+			if err != nil {
+				fmt.Fprintf(h.stdoutLogger, "Error retrieving actor logs: %v\n", err)
+				h.handleRunError(err, "Error retrieving actor logs")
+				return
+			}
+			now := time.Now().Format(time.RFC3339)
+			fmt.Fprintf(h.stdoutLogger, "[%s] Actor logs:\n%s\n", now, actorLogs)
+			fmt.Fprintf(h.stdoutLogger, "Waiting for 15 seconds before continuing...\n")
+			time.Sleep(15 * time.Second)
 		}
 	}
 }
@@ -180,14 +180,16 @@ func (h *taskHandle) stop() {
 }
 
 func (h *taskHandle) closeStdoutStream() {
+	h.stateLock.Lock()
+	defer h.stateLock.Unlock()
 
 	if h.stdoutLogger != nil {
-		time.Sleep(8 * time.Second)
-		h.stateLock.Lock()
-		defer h.stateLock.Unlock()
-		h.stdoutLogger.Close()
+		h.logger.Info("Closing stdout stream", "actor_id", h.ActorID)
+		err := h.stdoutLogger.Close()
+		if err != nil {
+			h.logger.Error("Error closing stdout stream", "error", err, "actor_id", h.ActorID)
+		}
 		h.stdoutLogger = nil
-		time.Sleep(4 * time.Second)
 	}
 }
 
