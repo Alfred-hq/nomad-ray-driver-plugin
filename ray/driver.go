@@ -600,6 +600,7 @@ func (d *RayDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch
 func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal string) error {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
+		d.logger.Error("Task not found", "task_id", taskID)
 		return drivers.ErrTaskNotFound
 	}
 	// TODO: implement driver specific logic to stop a task.
@@ -639,6 +640,7 @@ func (d *RayDriverPlugin) StopTask(taskID string, timeout time.Duration, signal 
 func (d *RayDriverPlugin) DestroyTask(taskID string, force bool) error {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
+		d.logger.Error("Task not found", "task_id", taskID)
 		return drivers.ErrTaskNotFound
 	}
 
