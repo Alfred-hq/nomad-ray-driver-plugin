@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - feat/ray
+      - release/production
 
   pull_request:
     branches:
