@@ -10,7 +10,7 @@ import importlib
 import psutil
 
 @ray.remote(max_restarts={{.MaxActorRestarts}}, max_task_retries={{.MaxTaskRetries}})
-class {{.Actor}}:
+class {{.ActorID}}:
     def __init__(self) -> None:
         self.finished = False
         self.period = 180
@@ -65,7 +65,7 @@ class {{.Actor}}:
 # Initialize connection to the Ray head node on the default port.
 ray.init(address=\"auto\", namespace=\"{{.Namespace}}\")
 
-pipeline_runner = {{.Actor}}.options(name=\"{{.Actor}}\", lifetime=\"detached\", max_concurrency=2, num_cpus={{.NumCPUs}}).remote()
+pipeline_runner = {{.ActorID}}.options(name=\"{{.ActorID}}\", lifetime=\"detached\", max_concurrency=2, num_cpus={{.NumCpu}}).remote()
 `
 
 const RemoteRunnerTemplate = `
@@ -77,7 +77,7 @@ ray.init(address=\"auto\", namespace=\"{{.Namespace}}\", runtime_env={\"RAY_ENAB
 def main():
     try:
         # Get the actor
-        actor = ray.get_actor(\"{{.Actor}}\")
+        actor = ray.get_actor(\"{{.ActorID}}\")
 
         # Trigger the actor's runner method without waiting for completion
         runner_task_ref = actor.runner.remote()
