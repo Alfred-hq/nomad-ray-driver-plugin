@@ -16,7 +16,7 @@ class {{.ActorID}}:
         self.period = 180
         self.runner_task_ref = None 
 
-    def {{.Runner}}(self):
+    def runner(self):
         try:
             directory_path = os.path.dirname(\"{{.PipelineFilePath}}\")
 
